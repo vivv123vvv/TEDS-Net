@@ -32,7 +32,7 @@ __pycache__
 *tmp/
 *.npy
 *.npz
-*.txt
+.idea/
 *.pt
 
 *.pdf
