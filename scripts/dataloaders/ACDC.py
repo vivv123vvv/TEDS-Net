@@ -3,8 +3,8 @@ import numpy as np
 import raster_geometry as rg
 import torch
 from torch.utils.data import Dataset
-import nibabel as nib
 from glob import glob
+import nibabel as nib
 
 
 class ACDC_dataclass(Dataset):
@@ -32,11 +32,23 @@ class ACDC_dataclass(Dataset):
         if subset == 'Train':
             data_dir = os.path.join(params.dataset.datapath, "training")
         else:
-            data_dir = os.path.join(params.dataset.datapath, "testing")
+            # 检查测试目录是否存在，如果不存在则使用训练数据的一部分
+            test_dir = os.path.join(params.dataset.datapath, "testing")
+            if os.path.exists(test_dir):
+                data_dir = test_dir
+            else:
+                data_dir = os.path.join(params.dataset.datapath, "training")
 
         # 获取所有患者文件夹
         patient_dirs = glob(os.path.join(data_dir, "patient*"))
         self.list_IDS = [os.path.basename(p) for p in patient_dirs]
+        
+        # 如果是测试子集且测试目录不存在，则使用训练数据的前5个患者作为测试数据
+        if subset == 'Test' and not os.path.exists(os.path.join(params.dataset.datapath, "testing")):
+            self.list_IDS = self.list_IDS[:5]  # 使用前5个患者作为测试数据
+        elif subset == 'Train' and not os.path.exists(os.path.join(params.dataset.datapath, "testing")):
+            self.list_IDS = self.list_IDS[5:]  # 剩余的作为训练数据
+        
         self.subset = subset
 
         # --- Generate Prior Shape ---
@@ -53,7 +65,7 @@ class ACDC_dataclass(Dataset):
         ID = self.list_IDS[idx]
 
         # 构建数据路径
-        if self.subset == 'Train':
+        if self.subset == 'Train' or not os.path.exists(os.path.join(self.params.dataset.datapath, "testing")):
             patient_path = os.path.join(self.params.dataset.datapath, "training", ID)
         else:
             patient_path = os.path.join(self.params.dataset.datapath, "testing", ID)
@@ -61,28 +73,28 @@ class ACDC_dataclass(Dataset):
         # 获取所有nii.gz文件
         nii_files = glob(os.path.join(patient_path, "*.nii.gz"))
 
-        # 查找ED和ES帧以及对应的标签
-        image_file = None
-        gt_file = None
-
         # 排除4D文件，只处理帧文件
         frame_files = [f for f in nii_files if "_4d.nii.gz" not in f]
 
         if not frame_files:
             raise FileNotFoundError(f"No valid image files found for patient {ID}")
 
-        # 选择第一个帧文件作为图像
+        # 分离图像文件和标签文件
         image_files = [f for f in frame_files if "_gt" not in f]
         gt_files = [f for f in frame_files if "_gt" in f]
 
-        if image_files:
-            image_file = image_files[0]  # 选择第一个图像文件
-        else:
+        if not image_files:
             raise FileNotFoundError(f"No image file found for patient {ID}")
 
-        # 查找对应的标签文件
-        if gt_files:
-            gt_file = gt_files[0]  # 选择第一个标签文件
+        # 选择第一个图像文件
+        image_file = image_files[0]
+        
+        # 尝试找到对应的标签文件
+        corresponding_gt = image_file.replace(".nii.gz", "_gt.nii.gz")
+        if corresponding_gt in gt_files:
+            gt_file = corresponding_gt
+        elif gt_files:
+            gt_file = gt_files[0]
         else:
             # 如果没有标签文件，使用图像文件作为替代（仅用于测试集）
             gt_file = image_file
@@ -107,7 +119,7 @@ class ACDC_dataclass(Dataset):
 
         # 只保留心肌标签（标签2），如果存在标签文件
         if image_file != gt_file:  # 有独立的标签文件
-            y_seg = (y_seg == 2).astype(np.float32)
+            y_seg = (y_seg == 2).astype(np.float32)  # 心肌标签为2
         else:  # 没有独立标签文件，测试集情况
             y_seg = np.zeros_like(y_seg, dtype=np.float32)
 

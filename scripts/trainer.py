@@ -124,7 +124,11 @@ class Trainer:
 
         self.params.batch=1
         test_dice = []
-        for (x,prior_shape, labels) in self.dataloader_dic['test']:
+        # 初始化变量以避免UnboundLocalError
+        x, labels, prior_shape, output = None, None, None, None
+        
+        for (batch_x, batch_prior_shape, batch_labels) in self.dataloader_dic['test']:
+            x, prior_shape, labels = batch_x, batch_prior_shape, batch_labels
 
             # -- Input into network --------------:
             output = self.net(x.to(self.device),prior_shape.to(self.device))
@@ -134,10 +138,18 @@ class Trainer:
             # -- Perform Dice Loss --------------:
             test_dice.append(dice_loss().np_loss(labels.to(self.device),output[0]))
 
-        print(" - -"*10)
-        print(f" Test Dice Loss: {1-np.mean(test_dice)} +/- {np.std(test_dice)} ")
-        print(" - -"*10)
-        self.ViewPrediction(x,labels,prior_shape,output)
+        if test_dice:  # 确保列表不为空
+            print(" - -"*10)
+            print(f" Test Dice Loss: {1-np.mean(test_dice)} +/- {np.std(test_dice)} ")
+            print(" - -"*10)
+            
+            # 只有在变量被赋值后才调用ViewPrediction
+            if x is not None and labels is not None and prior_shape is not None and output is not None:
+                self.ViewPrediction(x,labels,prior_shape,output)
+        else:
+            print(" - -"*10)
+            print(" Test Dice Loss: No valid test data")
+            print(" - -"*10)
 
     def ViewPrediction(self,x,labels,prior_shape,output):
         """
@@ -161,5 +173,6 @@ class Trainer:
             a.set_title(t)
             a.axis('off')
 
-        plt.savefig(os.path.join(self.params.data_path,'figure'))
-
+        # 修复路径问题，使用正确的属性名
+        save_path = os.path.join(self.params.dataset.datapath, 'figure.png')
+        plt.savefig(save_path)

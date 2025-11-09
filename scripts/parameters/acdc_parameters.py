@@ -14,7 +14,7 @@ class ACDC_dataset:
     ndims: int = 2
     inshape: List=field(default_factory=lambda: [144,208])
     ps_meas: List= field(default_factory=lambda: [35,7]) # prior shape measurements
-    datapath: str = "<< PATH TO ACDC DATASET >>"
+    datapath: str = "../Resources/database"
     betti: List=field(default_factory=lambda: [1,1,0,0])
 
 

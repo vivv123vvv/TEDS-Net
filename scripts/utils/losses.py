@@ -1,4 +1,3 @@
-
 import torch
 import numpy as np
 
@@ -46,13 +45,15 @@ class grad_loss:
 
         size =np.shape(y_pred)[2:]
         vectors = [torch.linspace(-1, 1, s) for s in size]
-        grids = torch.meshgrid(vectors)
+        grids = torch.meshgrid(vectors, indexing='ij')
         grid = torch.stack(grids)
-        grid = grid.to('cuda:0')
+        # 检查是否有可用的CUDA设备，如果没有则使用CPU
+        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        grid = grid.to(device)
 
-        flow_feild = torch.zeros(y_pred.size(),device='cuda:0')
+        flow_feild = torch.zeros(y_pred.size(), device=device)
         for i in range(y_pred.size()[0]):
-            flow_feild[i] = y_pred[i] +grid
+            flow_feild[i] = y_pred[i] + grid
 
 
 
@@ -74,4 +75,3 @@ class grad_loss:
     def np_loss(self,_,y_pred,loss_mult=None):
 
         return self.loss(_,y_pred,loss_mult).item()
-        
