@@ -57,7 +57,13 @@ class ACDC_dataclass(Dataset):
         # --- Generate Prior Shape ---
         rad, thick = params.dataset.ps_meas
         M, N = params.dataset.inshape
-        self.prior = rg.circle((M, N), radius=rad).astype(int) - rg.circle((M, N), radius=(rad - thick)).astype(int)
+        # 创建模糊的圆环形状，而不是清晰的二值圆环
+        outer_circle = rg.circle((M, N), radius=rad).astype(float)
+        inner_circle = rg.circle((M, N), radius=(rad - thick)).astype(float)
+        self.prior = outer_circle - inner_circle
+        # 添加一些模糊效果，使边缘不是完全锐利的
+        from scipy import ndimage
+        self.prior = ndimage.gaussian_filter(self.prior, sigma=0.8)
 
     def __len__(self):
         # Return the volumes in that data subet

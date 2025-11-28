@@ -81,11 +81,6 @@ if __name__ == '__main__':
                         help = 'Which dataset we are using',
                         choices=['ACDC','mnist'],
                         default='mnist')
-
-    parser.add_argument('--force_cpu', 
-                        help = 'Force training on CPU',
-                        action='store_true')
-
     parser.add_argument('--force_gpu', 
                         help = 'Force training on GPU (will raise error if CUDA is not available)',
                         action='store_true')
