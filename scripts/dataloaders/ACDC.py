@@ -41,6 +41,8 @@ class ACDC_dataclass(Dataset):
 
         # 获取所有患者文件夹
         patient_dirs = glob(os.path.join(data_dir, "patient*"))
+        print(f"数据目录: {data_dir}")
+        print(f"找到的患者目录数量: {len(patient_dirs)}")
         self.list_IDS = [os.path.basename(p) for p in patient_dirs]
         
         # 如果是测试子集且测试目录不存在，则使用训练数据的前5个患者作为测试数据
@@ -49,6 +51,7 @@ class ACDC_dataclass(Dataset):
         elif subset == 'Train' and not os.path.exists(os.path.join(params.dataset.datapath, "testing")):
             self.list_IDS = self.list_IDS[5:]  # 剩余的作为训练数据
         
+        print(f"{subset} 子集的患者数量: {len(self.list_IDS)}")
         self.subset = subset
 
         # --- Generate Prior Shape ---

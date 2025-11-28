@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from dataclasses_json import dataclass_json
 from typing import List, Type
 from enforce_typing import enforce_types
-
+import os
 
 @enforce_types
 @dataclass_json
@@ -14,7 +14,7 @@ class ACDC_dataset:
     ndims: int = 2
     inshape: List=field(default_factory=lambda: [144,208])
     ps_meas: List= field(default_factory=lambda: [35,7]) # prior shape measurements
-    datapath: str = "../Resources/database"
+    datapath: str = os.path.abspath("./Resources/database")  # 使用绝对路径
     betti: List=field(default_factory=lambda: [1,1,0,0])
 
 
