@@ -51,7 +51,7 @@ class GeneralNet:
     '''
 
     dropout: int = 1 # Include dropout
-    fi: int = 12 # initial number of feature maps
+    fi: int = 16 # initial number of feature maps
     net_depth: int=4 # network depth
     in_chan: int=1 # number of channels in
     out_chan: int=1 # number of channel out
