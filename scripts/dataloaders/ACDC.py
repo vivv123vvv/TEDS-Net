@@ -44,12 +44,15 @@ class ACDC_dataclass(Dataset):
         print(f"数据目录: {data_dir}")
         print(f"找到的患者目录数量: {len(patient_dirs)}")
         self.list_IDS = [os.path.basename(p) for p in patient_dirs]
+        print(f"Debug: Found {len(self.list_IDS)} patient directories in {data_dir}")
         
         # 如果是测试子集且测试目录不存在，则使用训练数据的前5个患者作为测试数据
         if subset == 'Test' and not os.path.exists(os.path.join(params.dataset.datapath, "testing")):
             self.list_IDS = self.list_IDS[:5]  # 使用前5个患者作为测试数据
+            print(f"Debug: Using first 5 patients for test subset, now have {len(self.list_IDS)} patients")
         elif subset == 'Train' and not os.path.exists(os.path.join(params.dataset.datapath, "testing")):
             self.list_IDS = self.list_IDS[5:]  # 剩余的作为训练数据
+            print(f"Debug: Using remaining patients for train subset, now have {len(self.list_IDS)} patients")
         
         print(f"{subset} 子集的患者数量: {len(self.list_IDS)}")
         self.subset = subset
@@ -57,7 +60,20 @@ class ACDC_dataclass(Dataset):
         # --- Generate Prior Shape ---
         rad, thick = params.dataset.ps_meas
         M, N = params.dataset.inshape
-        self.prior = rg.circle((M, N), radius=rad).astype(int) - rg.circle((M, N), radius=(rad - thick)).astype(int)
+        # 创建三角环形状作为先验形状
+        # 先创建圆形环，然后将其约束为三角形形状
+        circle_ring = rg.circle((M, N), radius=rad).astype(int) - rg.circle((M, N), radius=(rad - thick)).astype(int)
+        
+        # 创建一个三角形遮罩
+        triangle_points = [
+            [0.5, 0.5 - 0.4],      # 顶点
+            [0.5 - 0.4, 0.5 + 0.3],  # 左下角
+            [0.5 + 0.4, 0.5 + 0.3]   # 右下角
+        ]
+        triangle_mask = rg.polygon((M, N), triangle_points)
+        
+        # 将圆形环限制在三角形区域内
+        self.prior = (circle_ring * triangle_mask).astype(int)
 
     def __len__(self):
         # Return the volumes in that data subet
