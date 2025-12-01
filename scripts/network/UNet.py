@@ -301,7 +301,12 @@ class UNet_MW(nn.Module):
 
         self.conv = FConv(in_channels=features, out_channels=out_channels, kernel_size=1) # Output generator
 
-    def forward(self, x,_):
+    def forward(self, x, prior_shape=None):
+        """
+        前向传播函数，可以选择性地将UNet输出与先验形状结合
+        如果提供了prior_shape，则将其与UNet输出结合
+        否则，直接返回UNet的分割结果
+        """
 
         #x = inputs[:,0]
         enc_outputs = self.enc(x)
@@ -309,5 +314,13 @@ class UNet_MW(nn.Module):
         dec_output = self.dec(BottleNeck,enc_outputs)
         cnn_output = self.conv(dec_output)
 
-        return torch.sigmoid(cnn_output),1
-
+        # 如果提供了先验形状，则将其与UNet输出结合
+        if prior_shape is not None:
+            # 将UNet输出作为权重应用于先验形状
+            # 这里使用sigmoid确保输出在0-1范围内
+            weights = torch.sigmoid(cnn_output)
+            combined_output = weights * prior_shape
+            return combined_output, 1
+        
+        # 否则直接返回UNet的输出
+        return torch.sigmoid(cnn_output), 1

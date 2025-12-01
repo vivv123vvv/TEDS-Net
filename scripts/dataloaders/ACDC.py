@@ -44,12 +44,16 @@ class ACDC_dataclass(Dataset):
         print(f"数据目录: {data_dir}")
         print(f"找到的患者目录数量: {len(patient_dirs)}")
         self.list_IDS = [os.path.basename(p) for p in patient_dirs]
-        
+
+        """
         # 如果是测试子集且测试目录不存在，则使用训练数据的前5个患者作为测试数据
         if subset == 'Test' and not os.path.exists(os.path.join(params.dataset.datapath, "testing")):
             self.list_IDS = self.list_IDS[:5]  # 使用前5个患者作为测试数据
         elif subset == 'Train' and not os.path.exists(os.path.join(params.dataset.datapath, "testing")):
-            self.list_IDS = self.list_IDS[5:]  # 剩余的作为训练数据
+            # 修改这里：不再排除前5个患者，而是使用全部训练数据
+            # self.list_IDS = self.list_IDS[5:]  # 原来的做法：剩余的作为训练数据
+            pass  # 现在的做法：使用所有训练数据进行训练
+            """
         
         print(f"{subset} 子集的患者数量: {len(self.list_IDS)}")
         self.subset = subset

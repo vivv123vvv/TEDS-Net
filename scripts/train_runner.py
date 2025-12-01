@@ -12,7 +12,7 @@ class Train_Runner:
         self.setup_params(args)
 
         # 2) Setup Device ----------- :
-        if args.force_cpu:
+        if hasattr(args, 'force_cpu') and args.force_cpu:
             device = torch.device("cpu")
             print("强制使用CPU进行训练")
         elif args.force_gpu or args.force_incompatible_gpu:
@@ -81,6 +81,9 @@ if __name__ == '__main__':
                         help = 'Which dataset we are using',
                         choices=['ACDC','mnist'],
                         default='mnist')
+    parser.add_argument('--force_cpu', 
+                        help = 'Force training on CPU',
+                        action='store_true')
     parser.add_argument('--force_gpu', 
                         help = 'Force training on GPU (will raise error if CUDA is not available)',
                         action='store_true')

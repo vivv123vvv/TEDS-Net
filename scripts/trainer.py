@@ -158,21 +158,25 @@ class Trainer:
         import matplotlib.pyplot as plt
 
         # Get a single prediction:
-        x =x[0,0,:,:].cpu().numpy().astype(int) # image
-        y = labels[0,0,:,:].cpu().numpy().astype(int) # ground truth
-        y_hat =output[0][0,0,:,:].cpu().numpy().astype(int) # prediction
-        p = prior_shape[0,0,:,:].cpu().numpy().astype(int)# prior
+        x =x[0,0,:,:].cpu().numpy() # image
+        y = labels[0,0,:,:].cpu().numpy() # ground truth
+        y_hat =output[0][0,0,:,:].cpu().numpy() # prediction
+        p = prior_shape[0,0,:,:].cpu().numpy() # prior
 
         # make our figure
-        fig,ax = plt.subplots(ncols=3)
-        cmaps = 'winter','autumn','summer'
-        for i,(a,seg,t) in enumerate(zip(ax,[y,p,y_hat],['Label','Prior',"Prediction"])):
-            a.imshow(x,cmap='gray')
-            mask_lab = np.ma.masked_array(seg, seg == 0)# mask out label
-            a.imshow(mask_lab, cmap=cmaps[i], alpha = 0.6)
+        fig,ax = plt.subplots(ncols=4, figsize=(16, 4))
+        cmaps = 'gray','winter','autumn','summer'
+        for i,(a,seg,t) in enumerate(zip(ax,[x,y,p,y_hat],['Image','Label','Prior',"Prediction"])):
+            if t == 'Image':
+                a.imshow(seg, cmap=cmaps[i])
+            else:
+                a.imshow(x, cmap='gray')
+                mask_lab = np.ma.masked_array(seg, seg == 0)  # mask out background
+                a.imshow(mask_lab, cmap=cmaps[i], alpha=0.6)
             a.set_title(t)
             a.axis('off')
 
         # 修复路径问题，使用正确的属性名
         save_path = os.path.join(self.params.dataset.datapath, 'figure.png')
         plt.savefig(save_path)
+        plt.close()  # 关闭图形以释放内存

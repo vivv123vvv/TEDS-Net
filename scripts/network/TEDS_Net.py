@@ -1,4 +1,3 @@
-
 import numpy as np
 import torch.nn as nn 
 import torch.nn.functional as F
@@ -68,11 +67,12 @@ class TEDS_Net(nn.Module):
             self.downsample =MaxPool(kernel_size= 3,stride =self.mega_P,padding=1) # downsample the final results
 
 
-    def forward(self, x,prior_shape):
+    def forward(self, x, prior_shape):
         '''
         Inputs [ tensor] - dims [Batch,2,Chan,X,Y,Z] where the second dimension has both the prior shape and the image
+        在此方法中，UNet网络生成的特征被用来创建位移场，该位移场应用于先验形状以生成最终分割
         '''
-
+        
         # -------- 0. Get inputs
         #x = inputs[:,0,...] # first channel of batch
         #prior_shape =inputs[:,1:] # second channel of batch
@@ -82,15 +82,19 @@ class TEDS_Net(nn.Module):
         BottleNeck =self.bottleneck(enc_outputs[-1])
 
         # --------- 2. Dec + Diffeo:
+        # 在这里，UNet网络的输出与先验形状结合
+        # UNet生成位移场，然后将该位移场应用于先验形状
         if self.no_branches ==1:
             flow_field,flow_upsamp,sampled=self.STN(BottleNeck,enc_outputs,prior_shape)
             # DOWNSAMPLE
             if self.mega_P>1:
                 sampled = self.downsample(sampled)
 
+            # 返回形变后的先验形状作为分割结果
             return sampled,flow_upsamp
 
         elif self.no_branches ==2:
+            # 双分支结构，先用bulk分支处理，再用ft分支细化
             flow_bulk_field,flow_bulk_upsamp,bulk_sampled=self.STN_bulk(BottleNeck,enc_outputs,prior_shape)
             flow_ft_field,flow_ft_upsamp,ft_sampled=self.STN_ft(BottleNeck,enc_outputs,bulk_sampled)
 
@@ -98,6 +102,5 @@ class TEDS_Net(nn.Module):
                 bulk_sampled = self.downsample(bulk_sampled)
                 ft_sampled = self.downsample(ft_sampled)
             
-
+            # 返回最终的形变先验形状作为分割结果
             return ft_sampled, flow_bulk_upsamp,flow_ft_upsamp
-

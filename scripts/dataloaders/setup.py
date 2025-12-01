@@ -56,7 +56,8 @@ def setup_acdc_dataloader(params,subset_list):
         dataloader_dict['train'] = DataLoader(training_set, **params_train)            
 
     if 'validation' in subset_list:
-        val_set = MyDataset(params, subset='Train')
+        # 修改验证集使用的数据子集，避免使用训练数据的一部分作为验证
+        val_set = MyDataset(params, subset='Test')  # 使用测试集作为验证集，避免使用训练数据的一部分
         dataloader_dict['validation'] = DataLoader(val_set, **params_val)
     if 'test' in subset_list:
         test_set = MyDataset(params, subset='Test')
