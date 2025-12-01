@@ -61,10 +61,21 @@ class ACDC_dataclass(Dataset):
         # --- Generate Prior Shape ---
         rad, thick = params.dataset.ps_meas
         M, N = params.dataset.inshape
-        # 创建模糊的圆环形状，而不是清晰的二值圆环
+        # 创建更不规则但保持中心孔洞的模糊形状
+        # 外边界（不规则环形）
         outer_circle = rg.circle((M, N), radius=rad).astype(float)
+        # 添加随机扰动使外边界不规则
+        np.random.seed(42)  # 固定种子保证一致性
+        noise = np.random.normal(0, 0.1, (M, N))
+        outer_circle = np.clip(outer_circle + noise, 0, 1)
+        
+        # 内边界（保持圆形以确保中心孔洞）
         inner_circle = rg.circle((M, N), radius=(rad - thick)).astype(float)
+        
+        # 构造先验形状：外边界减去内边界
         self.prior = outer_circle - inner_circle
+        # 确保值在合理范围内
+        self.prior = np.clip(self.prior, 0, 1)
         # 添加一些模糊效果，使边缘不是完全锐利的
         from scipy import ndimage
         self.prior = ndimage.gaussian_filter(self.prior, sigma=0.8)
@@ -140,22 +151,17 @@ class ACDC_dataclass(Dataset):
         target_shape = tuple(self.params.dataset.inshape)
         if x.shape != target_shape:
             # 使用线性插值调整图像尺寸
-            x_resized = np.zeros(target_shape, dtype=np.float32)
-            y_seg_resized = np.zeros(target_shape, dtype=np.float32)
+            from scipy.ndimage import zoom
+            zoom_factors = (target_shape[0] / x.shape[0], target_shape[1] / x.shape[1])
+            x = zoom(x, zoom_factors, order=1)  # 双线性插值
+            y_seg = zoom(y_seg, zoom_factors, order=0)  # 最近邻插值
 
-            # 简单的重采样方法（最近邻）
-            x_ratio = x.shape[0] / target_shape[0]
-            y_ratio = x.shape[1] / target_shape[1]
-
-            for i in range(target_shape[0]):
-                for j in range(target_shape[1]):
-                    x_src = min(int(i * x_ratio), x.shape[0] - 1)
-                    y_src = min(int(j * y_ratio), x.shape[1] - 1)
-                    x_resized[i, j] = x[x_src, y_src]
-                    y_seg_resized[i, j] = y_seg[x_src, y_src]
-
-            x = x_resized
-            y_seg = y_seg_resized
+        # 确保数据维度正确
+        if len(x.shape) != 2 or len(y_seg.shape) != 2:
+            raise ValueError(f"图像数据维度不正确，期望2D，实际x.shape={x.shape}, y_seg.shape={y_seg.shape}")
+            
+        if x.shape != tuple(self.params.dataset.inshape):
+            raise ValueError(f"图像尺寸不匹配，期望{self.params.dataset.inshape}，实际{x.shape}")
 
         # Get Data in Torch Convention:
         x = np.expand_dims(x, axis=0).copy()  # 添加.copy()确保数组是可写的

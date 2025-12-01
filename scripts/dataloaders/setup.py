@@ -6,14 +6,15 @@ def setup_mnist_dataloader(params,subset_list):
     from dataloaders.mnist import MNIST_dataclass as MyDataset
 
     # --------- Dataloaders Functions:
+    # 在Windows环境下设置num_workers=0以避免多进程问题
     params_train = {'batch_size': params.batch, 'shuffle': True,
-                    'num_workers': 8}
+                    'num_workers': 0}
 
     params_val = {'batch_size': params.batch, 'shuffle': False,
-                'num_workers': 8}  
+                'num_workers': 0}  
 
     params_test = {'batch_size': params.batch, 'shuffle': False,
-                'num_workers': 8}  
+                'num_workers': 0}  
 
 
     dataloader_dict = {}
@@ -36,14 +37,15 @@ def setup_acdc_dataloader(params,subset_list):
     from dataloaders.ACDC import ACDC_dataclass as MyDataset
 
     # --------- Dataloaders Functions:
+    # 在Windows环境下设置num_workers=0以避免多进程问题
     params_train = {'batch_size': params.batch, 'shuffle': True,
-                    'num_workers': 8}
+                    'num_workers': 0}
 
     params_val = {'batch_size': params.batch, 'shuffle': False,
-                'num_workers': 8}  
+                'num_workers': 0}  
 
     params_test = {'batch_size': params.batch, 'shuffle': False,
-                'num_workers': 8}  
+                'num_workers': 0}  
 
 
     # Put in my dataloader functions:
