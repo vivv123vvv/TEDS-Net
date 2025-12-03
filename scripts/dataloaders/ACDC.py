@@ -61,16 +61,33 @@ class ACDC_dataclass(Dataset):
         # --- Generate Prior Shape ---
         rad, thick = params.dataset.ps_meas
         M, N = params.dataset.inshape
-        # 创建更不规则但保持中心孔洞的模糊形状
-        # 外边界（不规则环形）
-        outer_circle = rg.circle((M, N), radius=rad).astype(float)
-        # 添加随机扰动使外边界不规则
-        np.random.seed(42)  # 固定种子保证一致性
-        noise = np.random.normal(0, 0.1, (M, N))
-        outer_circle = np.clip(outer_circle + noise, 0, 1)
         
-        # 内边界（保持圆形以确保中心孔洞）
-        inner_circle = rg.circle((M, N), radius=(rad - thick)).astype(float)
+        # 创建不规则但保持单一中心孔洞的形状
+        center_x, center_y = M // 2, N // 2
+        y, x = np.ogrid[:M, :N]
+        
+        # 计算点到中心的距离
+        distance_from_center = np.sqrt((x - center_y)**2 + (y - center_x)**2)
+        
+        # 创建不规则的外边界，但变化幅度较小
+        angles = np.arctan2(y - center_x, x - center_y)
+        # 使用较小的幅度变化确保大小不会改变太多
+        radius_variation = 0.08 * rad * (np.sin(3 * angles) + 0.5 * np.sin(5 * angles))
+        outer_radius = rad + radius_variation
+        
+        # 创建外边界（不规则形状）
+        outer_shape = distance_from_center < outer_radius
+        outer_circle = outer_shape.astype(float)
+        
+        # 创建不规则的内边界，同样保持变化幅度较小
+        inner_rad = rad - thick
+        # 内边界的角度变形，使用不同的频率确保与外边界不同
+        inner_radius_variation = 0.06 * inner_rad * (np.sin(4 * angles) + 0.4 * np.sin(7 * angles))
+        inner_radius = inner_rad + inner_radius_variation
+        
+        # 创建内边界（不规则形状）
+        inner_shape = distance_from_center < inner_radius
+        inner_circle = inner_shape.astype(float)
         
         # 构造先验形状：外边界减去内边界
         self.prior = outer_circle - inner_circle
