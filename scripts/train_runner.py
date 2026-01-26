@@ -31,7 +31,7 @@ class Train_Runner:
         """
         
         if args.dataset =="mnist":
-            from parameters.mnist_parameters import Parameters
+            from parameters import Parameters
         elif args.dataset=="ACDC":
             from parameters.acdc_parameters import Parameters
 

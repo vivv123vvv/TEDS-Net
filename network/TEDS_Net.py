@@ -1,11 +1,6 @@
+import torch.nn as nn
 
-import numpy as np
-import torch.nn as nn 
-import torch.nn.functional as F
-from torch.distributions.normal import Normal
-import torchvision.transforms.functional as FF
-
-from network.UNet import ConvBlock,EncoderBranch,DecoderBranch,BottleNeck
+from network.UNet import EncoderBranch, BottleNeck
 from network.utils_teds import WholeDiffeoUnit
 
 class TEDS_Net(nn.Module):
