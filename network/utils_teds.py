@@ -6,61 +6,143 @@ import torch.nn.functional as F
 from torch.distributions.normal import Normal
 from network.UNet import DecoderBranch
 
+# --- 在文件最上方添加这个 import ---
+from torch.nn.utils import spectral_norm
+
+
+# --- 插入以下两个类定义 ---
+
+class LC_ResNet_Block(nn.Module):
+    """
+    R2Net 的核心残差块：
+    ConvSN(3x3) -> LeakyReLU -> ConvSN(1x1) -> Tanh -> Scale -> Add
+    根据输入通道数自动判断是 2D 还是 3D 卷积。
+    """
+
+    def __init__(self, channels):
+        super(LC_ResNet_Block, self).__init__()
+
+        # 根据通道数判断维度 (通常 flow field 通道数 = 维度数)
+        # 2通道 -> 2D卷积, 3通道 -> 3D卷积
+        ndims = channels
+        Conv = nn.Conv2d if ndims == 2 else nn.Conv3d
+
+        # 1. 第一层: 3x3 卷积 + 谱归一化
+        self.conv1 = spectral_norm(Conv(channels, channels, kernel_size=3, padding=1, stride=1, bias=False))
+        self.relu = nn.LeakyReLU(0.2)
+
+        # 2. 第二层: 1x1 卷积 + 谱归一化 (对应 network.py 中的 1x1 卷积结构)
+        self.conv2 = spectral_norm(Conv(channels, channels, kernel_size=1, padding=0, stride=1, bias=False))
+        self.tanh = nn.Tanh()
+
+    def forward(self, x):
+        residual = self.conv1(x)
+        residual = self.relu(residual)
+        residual = self.conv2(residual)
+        residual = self.tanh(residual)
+
+        # 3. Scaling: R2Net 建议除以 2.0 以保证 Lipschitz 常数 < 1
+        residual = residual / 2.0
+
+        # 4. Residual Add
+        return x + residual
+
+
+class R2Net_Integrator(nn.Module):
+    """
+    R2Net 积分器：替代 Scaling and Squaring
+    包含初始缩放和堆叠的残差块
+    """
+
+    def __init__(self, channels, n_blocks=7):
+        super(R2Net_Integrator, self).__init__()
+
+        self.blocks = nn.ModuleList([
+            LC_ResNet_Block(channels) for _ in range(n_blocks)
+        ])
+
+    def forward(self, flow0):
+        # 初始输入先除以 2.0 (参考 network.py 的实现)
+        v = flow0 / 2.0
+
+        for block in self.blocks:
+            v = block(v)
+
+        return v
+
+
+# 假设上面的类定义在同文件或已导入
+# from network.r2net_torch import R2Net_Integrator
+# from network.UNet import DecoderBranch ... (保持原有的导入)
+# from network.utils_teds import GenDisField, WarpPriorShape, mw_SpatialTransformer
 
 class WholeDiffeoUnit(nn.Module):
     '''
-    The diffeo block: 
-    1. computes the decoder branch
-    2. generates an ndims field
-    3. applies diffeo intergretion
-    4. applies field to prior shape
+    Modified Diffeo block using R2Net (LC-ResNet) Integration logic.
+    Replaces Scaling and Squaring with Neural ODE integration.
     '''
 
-    def __init__(self,params,branch=1):
-        super(WholeDiffeoUnit,self).__init__()
+    def __init__(self, params, branch=1):
+        super(WholeDiffeoUnit, self).__init__()
 
         # Get parameters from params:
-        self.out_channels =params.network_params.out_chan
-        self.ndims  = params.dataset.ndims
-        self.viscous = params.network.guas_smooth
-        self.act = params.network.act
+        self.out_channels = params.network_params.out_chan
+        self.ndims = params.dataset.ndims
+        # self.viscous = params.network.guas_smooth # R2Net 不需要高斯平滑
+        # self.act = params.network.act # R2Net 内部自带 Tanh/Scale，不需要外部激活
         self.features = params.network_params.fi
         self.dropout = params.network_params.dropout
-        self.net_depth=params.network_params.net_depth
+        self.net_depth = params.network_params.net_depth
         self.dec_depth = params.network.dec_depth[branch]
         self.inshape = params.dataset.inshape
-        self.int_steps = params.network.diffeo_int
-        self.Guas_kernel = params.network.Guas_kernel
-        self.Guas_P = params.network.sigma
         self.mega_P = params.network.mega_P
 
         # GET DECODER OUTPUT:
-        # happy with this
-        self.dec =DecoderBranch(features=self.features,ndims=self.ndims,net_depth=self.net_depth,dec_depth=self.dec_depth,dropout=self.dropout)
-    
-        
-        # Size of initial flow field:
-        frac_size_change = [1,2,4,8] # The fractional change
-        self.flow_field_size = [int(s/frac_size_change[self.dec_depth-1]) for s in self.inshape]
-        # Size of upsampled flow field:
-        self.Mega_inshape = [s*self.mega_P for s in self.inshape]
+        self.dec = DecoderBranch(features=self.features, ndims=self.ndims,
+                                 net_depth=self.net_depth, dec_depth=self.dec_depth,
+                                 dropout=self.dropout)
 
-        # 1. GENERATE FIELDS
-        self.gen_field =GenDisField(self.dec_depth,self.features,self.ndims)
-        
-        # 2. Apply diffeomorphic settings :
-        self.diffeo_field = DiffeoUnit(self.flow_field_size,self.Mega_inshape,self.int_steps,self.viscous,self.Guas_kernel,self.Guas_P,self.mega_P)
-        # 3.  Apply transform to prior:
-        self.transformer = mw_SpatialTransformer(self.Mega_inshape)   
+        # Size calculation
+        frac_size_change = [1, 2, 4, 8]
+        self.flow_field_size = [int(s / frac_size_change[self.dec_depth - 1]) for s in self.inshape]
+        self.Mega_inshape = [s * self.mega_P for s in self.inshape]
 
-    def forward(self,BottleNeck,enc_outputs,prior_shape):
-        # Get decoder:
-        dec_output = self.dec(BottleNeck,enc_outputs)
-        flow_field =self.gen_field(dec_output)
-        flow_upsamp = self.diffeo_field(flow_field,self.act,self.viscous,self.ndims)
+        # 1. GENERATE FIELDS (Initial Velocity)
+        # 这是一个卷积层，输出通道数=ndims (例如3)
+        self.gen_field = GenDisField(self.dec_depth, self.features, self.ndims)
+
+        # -----------------------------------------------------------
+        # 2. [REPLACEMENT] Apply R2Net Integration
+        # -----------------------------------------------------------
+        # 对应 network.py 中的 out1...out7 逻辑
+        self.r2net_integrator = R2Net_Integrator(channels=self.ndims, n_blocks=7)
+
+        # 3. Apply transform to prior:
+        self.transformer = mw_SpatialTransformer(self.Mega_inshape)
+
+    def forward(self, BottleNeck, enc_outputs, prior_shape):
+        # 1. Decoder
+        dec_output = self.dec(BottleNeck, enc_outputs)
+
+        # 2. Generate Initial Flow (Velocity)
+        # raw_velocity shape: [Batch, ndims, H_low, W_low, (D_low)]
+        raw_velocity = self.gen_field(dec_output)
+
+        # 3. R2Net Integration
+        # 这一步在低分辨率下进行，节省显存
+        flow_field = self.r2net_integrator(raw_velocity)
+
+        # 4. Upsample (修复点)
+        # 必须上采样到 self.Mega_inshape，因为 flow_field 是下采样后的尺寸 (如 52)，而 grid 是原图尺寸 (如 416)
+        mode = 'bilinear' if self.ndims == 2 else 'trilinear'
+        flow_upsamp = F.interpolate(flow_field, size=tuple(self.Mega_inshape),
+                                    mode=mode, align_corners=True)
+
+        # 5. Warp Prior
+        # 现在 flow_upsamp 的尺寸与 self.transformer 中的 grid 尺寸一致，不会报错了
         sampled = WarpPriorShape(self, prior_shape, flow_upsamp)
-        
-        return flow_field,flow_upsamp,sampled
+
+        return flow_field, flow_upsamp, sampled
 
 
 
