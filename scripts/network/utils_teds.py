@@ -1,37 +1,36 @@
-import os
+﻿import os
 import sys
 import torch
 import numpy as np
 import numbers
 import math
-import torch.nn as nn 
+import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions.normal import Normal
 import torchvision.transforms.functional as FF
-from network.UNet import ConvBlock,EncoderBranch,DecoderBranch,BottleNeck
-
+from network.UNet import ConvBlock, EncoderBranch, DecoderBranch, BottleNeck
 
 
 class WholeDiffeoUnit(nn.Module):
-    '''
-    The diffeo block: 
-    1. computes the decoder branch
-    2. generates an ndims field
-    3. applies diffeo intergretion
-    4. applies field to prior shape
-    '''
+    """
+    形变模块，主要完成以下步骤：
+    1. 计算解码器分支输出
+    2. 生成与维度匹配的位移场
+    3. 执行可微分积分
+    4. 将位移场应用到先验形状上
+    """
 
-    def __init__(self,params,branch=1):
-        super(WholeDiffeoUnit,self).__init__()
+    def __init__(self, params, branch=1):
+        super(WholeDiffeoUnit, self).__init__()
 
-        # Get parameters from params:
-        self.out_channels =params.network_params.out_chan
-        self.ndims  = params.dataset.ndims
+        # 从参数中读取配置
+        self.out_channels = params.network_params.out_chan
+        self.ndims = params.dataset.ndims
         self.viscous = params.network.guas_smooth
         self.act = params.network.act
         self.features = params.network_params.fi
         self.dropout = params.network_params.dropout
-        self.net_depth=params.network_params.net_depth
+        self.net_depth = params.network_params.net_depth
         self.dec_depth = params.network.dec_depth[branch]
         self.inshape = params.dataset.inshape
         self.int_steps = params.network.diffeo_int
@@ -39,206 +38,192 @@ class WholeDiffeoUnit(nn.Module):
         self.Guas_P = params.network.sigma
         self.mega_P = params.network.mega_P
 
-        # GET DECODER OUTPUT:
-        # happy with this
-        self.dec =DecoderBranch(features=self.features,ndims=self.ndims,net_depth=self.net_depth,dec_depth=self.dec_depth,dropout=self.dropout)
-    
-        
-        # Size of initial flow field:
-        frac_size_change = [1,2,4,8] # The fractional change
-        self.flow_field_size = [int(s/frac_size_change[self.dec_depth-1]) for s in self.inshape]
-        # Size of upsampled flow field:
-        self.Mega_inshape = [s*self.mega_P for s in self.inshape]
+        # 构建解码器输出
+        self.dec = DecoderBranch(features=self.features, ndims=self.ndims, net_depth=self.net_depth, dec_depth=self.dec_depth, dropout=self.dropout)
 
-        # 1. GENERATE FIELDS
-        self.gen_field =GenDisField(self.dec_depth,self.features,self.ndims)
-        
-        # 2. Apply diffeomorphic settings :
-        self.diffeo_field = DiffeoUnit(self.flow_field_size,self.Mega_inshape,self.int_steps,self.viscous,self.Guas_kernel,self.Guas_P,self.mega_P)
-        # 3.  Apply transform to prior:
-        self.transformer = mw_SpatialTransformer(self.Mega_inshape)   
+        # 初始位移场尺寸
+        frac_size_change = [1, 2, 4, 8]  # 各解码层对应的缩放比例
+        self.flow_field_size = [int(s / frac_size_change[self.dec_depth - 1]) for s in self.inshape]
+        # 上采样后的位移场尺寸
+        self.Mega_inshape = [s * self.mega_P for s in self.inshape]
 
-    def forward(self,BottleNeck,enc_outputs,prior_shape):
-        # Get decoder:
-        dec_output = self.dec(BottleNeck,enc_outputs)
-        flow_field =self.gen_field(dec_output)
-        flow_upsamp = self.diffeo_field(flow_field,self.act,self.viscous,self.ndims)
+        # 1. 生成位移场
+        self.gen_field = GenDisField(self.dec_depth, self.features, self.ndims)
+
+        # 2. 应用可微分积分设置
+        self.diffeo_field = DiffeoUnit(self.flow_field_size, self.Mega_inshape, self.int_steps, self.viscous, self.Guas_kernel, self.Guas_P, self.mega_P)
+        # 3. 将位移应用到先验形状
+        self.transformer = mw_SpatialTransformer(self.Mega_inshape)
+
+    def forward(self, BottleNeck, enc_outputs, prior_shape):
+        # 计算解码器输出
+        dec_output = self.dec(BottleNeck, enc_outputs)
+        flow_field = self.gen_field(dec_output)
+        flow_upsamp = self.diffeo_field(flow_field, self.act, self.viscous, self.ndims)
         sampled = WarpPriorShape(self, prior_shape, flow_upsamp)
-        
-        return flow_field,flow_upsamp,sampled
 
+        return flow_field, flow_upsamp, sampled
 
 
 class GenDisField(nn.Module):
-    '''
-    From the output of the U-Net generate the correct sized fields
-    
-    input: dec output [batch,feature maps,...]
-    output: flow_Field [batch,ndims,...], with inialised wieghts
-    '''
-    def __init__(self,layer_nb,features,ndims):
+    """
+    根据 U-Net 输出生成合适尺寸的位移场。
+
+    输入：解码器输出 [batch, feature_maps, ...]
+    输出：位移场 [batch, ndims, ...]
+    """
+    def __init__(self, layer_nb, features, ndims):
         super().__init__()
 
-        if ndims ==3:
+        if ndims == 3:
             from torch.nn import Conv3d as ConvD
-        elif ndims==2:
+        elif ndims == 2:
             from torch.nn import Conv2d as ConvD
 
-        dec_features = [1,1,2,4] # number of features from each decoder level
-        self.flow_field= ConvD(dec_features[layer_nb-1]*features, out_channels=ndims, kernel_size=1) # Out_channels =3 (x,y,z), could be kerne=3 (??)
+        dec_features = [1, 1, 2, 4]  # 每个解码层对应的特征倍率
+        self.flow_field = ConvD(dec_features[layer_nb - 1] * features, out_channels=ndims, kernel_size=1)  # 输出通道数等于空间维度
         self.flow_field.weight = nn.Parameter(Normal(0, 1e-5).sample(self.flow_field.weight.shape))
         self.flow_field.bias = nn.Parameter(torch.zeros(self.flow_field.bias.shape))
 
-    def forward(self,CNN_output):
+    def forward(self, CNN_output):
         return self.flow_field(CNN_output)
 
 
-
 class DiffeoUnit(nn.Module):
-    '''
-    Takes in an initial field and ouputs the final upsampled field:
+    """
+    输入初始位移场，输出最终上采样后的位移场。
 
-    Takes in an [ndim,M,N] array which acts as the field
-    1. Activation Func:
-    2. Amplify across integration layers:
-    3. Super upsample to quantiity needed:
-    ''' 
+    输入为 [ndim, M, N] 形式的位移场，主要包含三步：
+    1. 激活函数约束
+    2. 多步积分放大
+    3. 超分辨率上采样
+    """
 
-    def __init__(self, flow_field_size,mega_size,int_steps=7,viscous=1,Guas_kernel=5,Guas_P=2,mega_P=2):
-        super(DiffeoUnit,self).__init__()
-        
-        # --  1. Intergration Layers:
-        self.flow_field_size=flow_field_size
-        self.integrate_layer = mw_DiffeoLayer(flow_field_size, int_steps,Guas_kernel,Guas_P=Guas_P) 
-        
-        # -- 2. Mega Upsample:
+    def __init__(self, flow_field_size, mega_size, int_steps=7, viscous=1, Guas_kernel=5, Guas_P=2, mega_P=2):
+        super(DiffeoUnit, self).__init__()
+
+        # 1. 积分层
+        self.flow_field_size = flow_field_size
+        self.integrate_layer = mw_DiffeoLayer(flow_field_size, int_steps, Guas_kernel, Guas_P=Guas_P)
+
+        # 2. 最终上采样
         self.Mega_inshape = mega_size
-        modes = {2:'bilinear',3:'trilinear'}
-        self.MEGAsmoothing_upsample =  nn.Upsample(self.Mega_inshape,mode=modes[len(flow_field_size)],align_corners=False)
+        modes = {2: 'bilinear', 3: 'trilinear'}
+        self.MEGAsmoothing_upsample = nn.Upsample(self.Mega_inshape, mode=modes[len(flow_field_size)], align_corners=False)
 
-    def forward(self,flow_field,act,viscous,ndims):
+    def forward(self, flow_field, act, viscous, ndims):
 
-        # 1. Activation Func = between the required amounts:
+        # 1. 使用激活函数限制初始位移幅度
         if act:
-            flow_field= DiffeoActivat(flow_field,self.flow_field_size)
+            flow_field = DiffeoActivat(flow_field, self.flow_field_size)
 
-        # 2. Get the displacment field:
-        amplified_flow_field = self.integrate_layer(flow_field,viscous)
+        # 2. 通过积分得到最终位移场
+        amplified_flow_field = self.integrate_layer(flow_field, viscous)
 
-        # 3. Super Upsample:
-        flow_Upsamp= self.MEGAsmoothing_upsample(amplified_flow_field) # Upsample
-
+        # 3. 上采样到目标尺寸
+        flow_Upsamp = self.MEGAsmoothing_upsample(amplified_flow_field)
 
         return flow_Upsamp
- 
 
 
 class mw_DiffeoLayer(nn.Module):
     """
-    Integrates a vector field via scaling and squaring.
-    Adapted from: https://github.com/voxelmorph/voxelmorph
-
+    使用 scaling and squaring 对向量场进行积分。
+    参考实现改编自：https://github.com/voxelmorph/voxelmorph
     """
 
-    def __init__(self, inshape, nsteps,kernel=3,Guas_P=2):
+    def __init__(self, inshape, nsteps, kernel=3, Guas_P=2):
         super().__init__()
-        
+
         assert nsteps >= 0, 'nsteps should be >= 0, found: %d' % nsteps
         self.nsteps = nsteps
-        # Set up spatial transformer to intergrate the flow field:
+        # 构建用于积分的空间变换器
         self.transformer = mw_SpatialTransformer(inshape)
 
         # ------------------------------
-        # SMOOTHING KERNEL:
+        # 平滑核配置
         # ------------------------------
         ndims = len(inshape)
-        self.sigma=Guas_P
+        self.sigma = Guas_P
         self.SmthKernel = GaussianSmoothing(channels=ndims, kernel_size=kernel, sigma=Guas_P, dim=ndims)
         # ------------------------------
         # ------------------------------
 
-    def forward(self, vec,viscous=1):
+    def forward(self, vec, viscous=1):
 
         for n in range(self.nsteps):
             vec = vec + self.transformer(vec, vec)
             if viscous:
-                # if viscous methods, then smooth at each composition:
-                vec =self.SmthKernel(vec)
+                # 若启用黏性平滑，则在每次复合后执行一次平滑
+                vec = self.SmthKernel(vec)
 
         return vec
 
 
-
 class mw_SpatialTransformer(nn.Module):
-    '''
-    The pytorch spatial Transformer
+    """
+    PyTorch 版空间变换器。
 
-    Pytorch transformers require grids generated between -1---1.
-    src - Prior shape or flow field [2,3,x,x,x]
-    flow - 
-    '''
+    PyTorch 的 grid_sample 需要位于 -1 到 1 之间的坐标网格。
+    src 可以是先验形状或位移场，常见形状如 [2, 3, x, x, x]。
+    """
     def __init__(self, size, mode='bilinear'):
         super().__init__()
 
         self.mode = mode
-        # create sampling grid (in Pytorch terms)
+        # 生成采样网格（PyTorch 坐标格式）
         vectors = [torch.linspace(-1, 1, s) for s in size]
         grids = torch.meshgrid(vectors)
         grid = torch.stack(grids)
         grid = torch.unsqueeze(grid, 0)
         grid = grid.type(torch.FloatTensor)
-        self.register_buffer('grid', grid) # not trained by the optimizer, saves memory
+        self.register_buffer('grid', grid)  # 不参与训练，但随模型一起保存
 
-
-    def forward(self,src,flow):
+    def forward(self, src, flow):
         new_locs = self.grid + flow
         shape = flow.shape[2:]
 
-        # Pytorch requires axis switch:
+        # 采样前需要按 PyTorch 约定调整坐标轴顺序
         if len(shape) == 2:
             new_locs = new_locs.permute(0, 2, 3, 1)
             new_locs = new_locs[..., [1, 0]]
 
         elif len(shape) == 3:
-            new_locs = new_locs.permute(0, 2, 3, 4, 1) 
-            new_locs = new_locs[..., [2, 1, 0]] 
+            new_locs = new_locs.permute(0, 2, 3, 4, 1)
+            new_locs = new_locs[..., [2, 1, 0]]
 
-            
         return F.grid_sample(src, new_locs, align_corners=True)
-
 
 
 class GaussianSmoothing(nn.Module):
     """
-    Adrian Sahlman:
+    Adrian Sahlman 的高斯平滑实现：
     https://discuss.pytorch.org/t/is-there-anyway-to-do-gaussian-filtering-for-an-image-2d-3d-in-pytorch/12351/7
-    Apply gaussian smoothing on a
-    1d, 2d or 3d tensor. Filtering is performed seperately for each channel
-    in the input using a depthwise convolution.
-    Arguments:
-        channels (int, sequence): Number of channels of the input tensors. Output will
-            have this number of channels as well.
-        kernel_size (int, sequence): Size of the gaussian kernel.
-        sigma (float, sequence): Standard deviation of the gaussian kernel. If it is less than 0, then it will learn sigma
-        dim (int, optional): The number of dimensions of the data.
-            Default value is 2 (spatial).
+
+    对 1D、2D 或 3D 张量执行高斯平滑。
+    过滤操作会按输入通道独立进行，即使用 depthwise convolution。
+
+    参数:
+        channels (int, sequence): 输入张量的通道数，输出通道数相同。
+        kernel_size (int, sequence): 高斯核大小。
+        sigma (float, sequence): 高斯核标准差；如果小于 0，则 sigma 可学习。
+        dim (int, optional): 数据维度，默认 2。
     """
 
     def __init__(self, channels, kernel_size=5, sigma=2, dim=2):
         super(GaussianSmoothing, self).__init__()
-        #sigma =2
+        # 默认初始化 sigma 为 2
         self.og_sigma = sigma
-        
-        kernel_dic = {3:1,5:2}
-        self.pad  =kernel_dic[kernel_size]
+
+        kernel_dic = {3: 1, 5: 2}
+        self.pad = kernel_dic[kernel_size]
 
         if isinstance(kernel_size, numbers.Number):
             kernel_size = [kernel_size] * dim
         if isinstance(sigma, numbers.Number):
             sigma = [sigma] * dim
 
-        # The gaussian kernel is the product of the
-        # gaussian function of each dimension.
+        # 高斯核由各维高斯函数相乘得到
         kernel = 1
         meshgrids = torch.meshgrid([torch.arange(size, dtype=torch.float32) for size in kernel_size])
 
@@ -247,34 +232,33 @@ class GaussianSmoothing(nn.Module):
             kernel *= 1 / (std * math.sqrt(2 * math.pi)) * \
                     torch.exp((-((mgrid - mean) / std) ** 2) / 2)
 
-        # Make sure sum of values in gaussian kernel equals 1.
+        # 保证高斯核元素和为 1
         kernel = kernel / torch.sum(kernel)
-    
-        # Reshape to depthwise convolutional weight
+
+        # 调整为 depthwise convolution 所需的权重形状
         kernel = kernel.view(1, 1, *kernel.size())
         kernel = kernel.repeat(channels, *[1] * (kernel.dim() - 1))
 
-        if self.og_sigma<0:
-            # --- Learnable Sigma---------------:
+        if self.og_sigma < 0:
+            # --- 可学习 sigma 的分支
             sigma = 2
-            self.learnable = 1 # is the network learnable or static?
+            self.learnable = 1  # 标记当前为可学习卷积
 
             if dim == 1:
-                self.conv = nn.Conv1d(in_channels = dim,out_channels = dim,kernel_size =kernel_size,padding=self.pad)
+                self.conv = nn.Conv1d(in_channels=dim, out_channels=dim, kernel_size=kernel_size, padding=self.pad)
             elif dim == 2:
-                self.conv = nn.Conv2d(in_channels = dim,out_channels = dim,kernel_size =kernel_size,padding=self.pad)
+                self.conv = nn.Conv2d(in_channels=dim, out_channels=dim, kernel_size=kernel_size, padding=self.pad)
             elif dim == 3:
-                self.conv = nn.Conv3d(in_channels = dim,out_channels = dim,kernel_size =kernel_size,padding=self.pad)
+                self.conv = nn.Conv3d(in_channels=dim, out_channels=dim, kernel_size=kernel_size, padding=self.pad)
             else:
                 raise RuntimeError('Only 1, 2 and 3 dimensions are supported. Received {}.'.format(dim))
 
-            # Initialse with normal dist
-            self.conv.weight = nn.Parameter(torch.cat((kernel,kernel),dim=1))
+            # 使用高斯核初始化权重
+            self.conv.weight = nn.Parameter(torch.cat((kernel, kernel), dim=1))
             self.conv.bias = nn.Parameter(torch.zeros(self.conv.bias.shape))
 
-
         else:
-            # --- Static network---------------:
+            # --- 固定高斯核分支
             self.learnable = 0
 
             self.register_buffer('weight', kernel)
@@ -290,60 +274,56 @@ class GaussianSmoothing(nn.Module):
             else:
                 raise RuntimeError('Only 1, 2 and 3 dimensions are supported. Received {}.'.format(dim))
 
-
     def forward(self, input):
         """
-        Apply gaussian filter to input.
-        Arguments:
-            input (torch.Tensor): Input to apply gaussian filter on.
-        Returns:
-            filtered (torch.Tensor): Filtered output.
+        对输入执行高斯平滑。
+
+        参数:
+            input (torch.Tensor): 待平滑的输入张量。
+
+        返回:
+            filtered (torch.Tensor): 平滑后的输出张量。
         """
-        # if static or trainable:
+        # 根据当前模式选择固定卷积或可学习卷积
         if self.learnable == 1:
             return self.conv(input)
         else:
-            return self.conv(input, weight=self.weight, groups=self.groups,padding=self.pad)
+            return self.conv(input, weight=self.weight, groups=self.groups, padding=self.pad)
 
 
-def DiffeoActivat(flow_field,size):
-    """ Activation Function
+def DiffeoActivat(flow_field, size):
+    """激活函数。
 
-    Args:
-        flow_field ([tensor array]): A n-dimension array containing the flow feild in each direction
-        size ([list]): [description]: The maximum size of the field, to limit the size of the intial displacement
+    参数:
+        flow_field (tensor): 每个方向上的位移场张量。
+        size (list): 位移场对应尺寸，用于限制初始位移幅度。
 
-    Returns:
-        flow_field [tensor array]: Flow field after the activation funciton has been applied.
+    返回:
+        tensor: 经过激活函数约束后的位移场。
     """
 
-    # Assert ndims is 2D or 3D
-    assert flow_field.size()[1] in [2,3]
-    assert len(size) in [2,3]
-    
+    # 仅支持 2D 或 3D 位移场
+    assert flow_field.size()[1] in [2, 3]
+    assert len(size) in [2, 3]
 
-    if len(size) ==3:
-        flow_1= torch.tanh(flow_field[:,0,:,:,:])*(1/size[0]) 
-        flow_2 = torch.tanh(flow_field[:,1,:,:,:])*(1/size[1])
-        flow_3= torch.tanh(flow_field[:,2,:,:,:])*(1/size[2])
-        flow_field =torch.stack((flow_1,flow_2,flow_3), dim=1)
-    elif len(size)==2:
-        flow_1= torch.tanh(flow_field[:,0,:,:])*(1/size[0])
-        flow_2 = torch.tanh(flow_field[:,1,:,:])*(1/size[1])
-        flow_field =torch.stack((flow_1,flow_2), dim=1)
+    if len(size) == 3:
+        flow_1 = torch.tanh(flow_field[:, 0, :, :, :]) * (1 / size[0])
+        flow_2 = torch.tanh(flow_field[:, 1, :, :, :]) * (1 / size[1])
+        flow_3 = torch.tanh(flow_field[:, 2, :, :, :]) * (1 / size[2])
+        flow_field = torch.stack((flow_1, flow_2, flow_3), dim=1)
+    elif len(size) == 2:
+        flow_1 = torch.tanh(flow_field[:, 0, :, :]) * (1 / size[0])
+        flow_2 = torch.tanh(flow_field[:, 1, :, :]) * (1 / size[1])
+        flow_field = torch.stack((flow_1, flow_2), dim=1)
 
     return flow_field
 
 
-
 def WarpPriorShape(self, prior_shape, disp_field):
-    '''
-    Tranform a set of prior shapes:
-    '''
-    # Apply displacment field
+    """
+    对一组先验形状施加位移场变换。
+    """
+    # 将位移场应用到先验形状上
     disp_prior_shape = self.transformer(prior_shape, disp_field)
 
     return disp_prior_shape
-
-
-
