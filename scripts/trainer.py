@@ -1,7 +1,9 @@
-﻿import torch
 import os
+
 import numpy as np
+import torch
 from tqdm import tqdm
+
 from utils.losses import dice_loss, grad_loss
 
 
@@ -9,13 +11,7 @@ class Trainer:
 
     def __init__(self, params, device, net):
 
-        """初始化训练与评估流程。
-
-        参数:
-            params (dict): 训练参数配置。
-            device (device): 模型训练所使用的设备。
-            net (class): TEDS-Net 网络实例。
-        """
+        """初始化训练与评估流程。"""
 
         self.params = params
         self.device = device
@@ -26,6 +22,18 @@ class Trainer:
         # 初始化优化器
         self.optimizer = torch.optim.Adam(self.net.parameters(), lr=self.params.lr)
 
+    def _iterate_subset(self, subset, max_batches=0, progress=True):
+        """按需截断 DataLoader，便于服务器 smoke test。"""
+
+        iterator = self.dataloader_dic[subset]
+        if progress:
+            iterator = tqdm(iterator)
+
+        for batch_index, batch in enumerate(iterator):
+            if max_batches and batch_index >= max_batches:
+                break
+            yield batch
+
     def dothetraining(self):
 
         # 遍历所有训练 epoch
@@ -33,9 +41,11 @@ class Trainer:
 
             # 执行训练阶段
             self.net.train()
-            subset = 'train'
             self.epoch_loss = []
-            for (x, prior_shape, labels) in tqdm(self.dataloader_dic[subset]):
+            for (x, prior_shape, labels) in self._iterate_subset(
+                'train',
+                max_batches=getattr(self.params, 'max_train_batches', 0),
+            ):
 
                 with torch.set_grad_enabled(True):
                     self.optimizer.zero_grad()
@@ -51,21 +61,24 @@ class Trainer:
                     self.optimizer.step()
 
             # 统计当前 epoch 的训练损失
-            train_loss = np.mean(self.epoch_loss)
+            train_loss = float(np.mean(self.epoch_loss)) if self.epoch_loss else float('nan')
 
             # 执行验证阶段
-            val_loss = self.do_validation(epoch)
+            val_loss = self.do_validation()
 
             # 打印损失
             print("[{0}] {1}: {2:.6f}".format(epoch, 'training_loss', train_loss))
             print("[{0}] {1}: {2:.6f}".format(epoch, 'validation_loss', val_loss))
 
-    def do_validation(self, epoch):
+    def do_validation(self):
         """对当前模型执行逐 batch 验证。"""
+
         self.net.eval()
         self.epoch_loss = []
-        subset = 'validation'
-        for (x, prior_shape, labels) in tqdm(self.dataloader_dic[subset]):
+        for (x, prior_shape, labels) in self._iterate_subset(
+            'validation',
+            max_batches=getattr(self.params, 'max_validation_batches', 0),
+        ):
 
             with torch.set_grad_enabled(False):
 
@@ -75,7 +88,7 @@ class Trainer:
                 # 计算损失
                 self.perform_losses(labels.to(self.device), output)
 
-        return np.mean(self.epoch_loss)
+        return float(np.mean(self.epoch_loss)) if self.epoch_loss else float('nan')
 
     def get_dataloader(self):
         """加载当前任务所需的数据加载器。"""
@@ -84,17 +97,13 @@ class Trainer:
             from dataloaders.setup import setup_mnist_dataloader as setup_dataloader
         elif self.params.data == "ACDC":
             from dataloaders.setup import setup_acdc_dataloader as setup_dataloader
+        else:
+            raise ValueError(f"不支持的数据集: {self.params.data}")
 
         self.dataloader_dic = setup_dataloader(self.params, ['train', 'validation', 'test'])
 
     def perform_losses(self, labels, output):
-        """计算并汇总所有损失项。
-
-        参数:
-            labels (tensor): 真实标注。
-            output (list): `output[0]` 为预测结果，`output[1]` 为 bulk 场，
-                `output[2]` 为 fine-tune 场。
-        """
+        """计算并汇总所有损失项。"""
 
         loss = 0
         for i, (loss_function, w) in enumerate(zip(self.params.loss_params.loss, self.params.loss_params.weight)):
@@ -104,6 +113,8 @@ class Trainer:
                 curr_loss = dice_loss().loss(labels, output[i], loss_mult=w)
             elif "grad" in loss_function:
                 curr_loss = grad_loss(self.params).loss(labels, output[i], loss_mult=w)
+            else:
+                raise ValueError(f"不支持的损失函数: {loss_function}")
 
             # 累加当前损失
             loss += curr_loss
@@ -116,25 +127,40 @@ class Trainer:
     def do_evalutation(self):
         """评估训练后模型，并计算平均 Dice 指标。"""
 
-        self.params.batch = 1
+        self.net.eval()
         test_dice = []
-        for (x, prior_shape, labels) in self.dataloader_dic['test']:
+        x = labels = prior_shape = output = None
+        for (x, prior_shape, labels) in self._iterate_subset(
+            'test',
+            max_batches=getattr(self.params, 'max_test_batches', 0),
+            progress=False,
+        ):
 
             # 前向推理
-            output = self.net(x.to(self.device), prior_shape.to(self.device))
-            output = list(output)
-            output[0] = (output[0] > self.params.threshold).int()
+            with torch.no_grad():
+                output = self.net(x.to(self.device), prior_shape.to(self.device))
+                output = list(output)
+                output[0] = (output[0] > self.params.threshold).int()
 
             # 计算 Dice 损失
             test_dice.append(dice_loss().np_loss(labels.to(self.device), output[0]))
 
+        if not test_dice:
+            print("未执行测试集评估：当前测试批次数为 0。")
+            return
+
         print(" - -" * 10)
         print(f" Test Dice Loss: {1 - np.mean(test_dice)} +/- {np.std(test_dice)} ")
         print(" - -" * 10)
-        self.ViewPrediction(x, labels, prior_shape, output)
+        if getattr(self.params, 'plot_predictions', True):
+            self.ViewPrediction(x, labels, prior_shape, output)
 
     def ViewPrediction(self, x, labels, prior_shape, output):
         """可视化一组测试样本的标签、先验与预测结果。"""
+
+        import matplotlib
+
+        matplotlib.use("Agg")
         import matplotlib.pyplot as plt
 
         # 取单个样本做展示
@@ -146,11 +172,13 @@ class Trainer:
         # 绘制可视化图像
         fig, ax = plt.subplots(ncols=3)
         cmaps = 'winter', 'autumn', 'summer'
-        for i, (a, seg, t) in enumerate(zip(ax, [y, p, y_hat], ['Label', 'Prior', "Prediction"])):
+        for a, seg, title, cmap in zip(ax, [y, p, y_hat], ['Label', 'Prior', "Prediction"], cmaps):
             a.imshow(x, cmap='gray')
             mask_lab = np.ma.masked_array(seg, seg == 0)  # 掩掉背景区域
-            a.imshow(mask_lab, cmap=cmaps[i], alpha=0.6)
-            a.set_title(t)
+            a.imshow(mask_lab, cmap=cmap, alpha=0.6)
+            a.set_title(title)
             a.axis('off')
 
-        plt.savefig(os.path.join(self.params.data_path, 'figure'))
+        os.makedirs(self.params.data_path, exist_ok=True)
+        plt.savefig(os.path.join(self.params.data_path, 'figure.png'), bbox_inches='tight')
+        plt.close(fig)

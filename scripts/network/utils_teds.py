@@ -173,7 +173,7 @@ class mw_SpatialTransformer(nn.Module):
         self.mode = mode
         # 生成采样网格（PyTorch 坐标格式）
         vectors = [torch.linspace(-1, 1, s) for s in size]
-        grids = torch.meshgrid(vectors)
+        grids = torch.meshgrid(*vectors, indexing='ij')
         grid = torch.stack(grids)
         grid = torch.unsqueeze(grid, 0)
         grid = grid.type(torch.FloatTensor)
@@ -225,7 +225,10 @@ class GaussianSmoothing(nn.Module):
 
         # 高斯核由各维高斯函数相乘得到
         kernel = 1
-        meshgrids = torch.meshgrid([torch.arange(size, dtype=torch.float32) for size in kernel_size])
+        meshgrids = torch.meshgrid(
+            *[torch.arange(size, dtype=torch.float32) for size in kernel_size],
+            indexing='ij',
+        )
 
         for size, std, mgrid in zip(kernel_size, sigma, meshgrids):
             mean = (size - 1) / 2

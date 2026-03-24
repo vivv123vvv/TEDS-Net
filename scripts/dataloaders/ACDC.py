@@ -19,14 +19,17 @@ class ACDC_dataclass(Dataset):
 
     def __init__(self,
                  params,
+                 list_ids,
                  subset,
+                 aug=False,
 
                  ):
         self.params = params
+        self.aug = aug
 
         assert subset in ['Train', 'Test']
 
-        self.list_IDS = "< LIST OF IDS OF CERTAIN SUBSET >"
+        self.list_IDS = list_ids
 
         # 生成环形先验形状
         rad, thick = params.dataset.ps_meas
@@ -43,7 +46,7 @@ class ACDC_dataclass(Dataset):
 
         # 读取体数据与分割标签
         x = np.load(os.path.join(self.params.data_path, f"Vol/{ID}"))
-        y_seg = np.load(os.path.join(self.params.data_path, f"Vol/{ID}"))
+        y_seg = np.load(os.path.join(self.params.data_path, f"Seg/{ID}"))
 
         # 转换为 PyTorch 使用的张量格式
         x = np.expand_dims(x, axis=0)

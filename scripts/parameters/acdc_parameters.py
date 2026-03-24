@@ -74,17 +74,23 @@ class Parameters:
     lr: float = 0.0001
     lr_sch: bool = False
     batch: int = 5
+    num_workers: int = 0
     checkpoint_freq: int = 50
     threshold: float = 0.3
+    plot_predictions: bool = True
+    max_train_batches: int = 0
+    max_validation_batches: int = 0
+    max_test_batches: int = 0
 
     # 损失函数参数
-    loss_params: LossParams = LossParams()
+    loss_params: LossParams = field(default_factory=LossParams)
 
     # 网络超参数
-    network_params: GeneralNet = GeneralNet()
+    network_params: GeneralNet = field(default_factory=GeneralNet)
 
     # 数据集与网络配置
+    data_path: str = "<< PATH TO ACDC DATASET >>"
     data: str = 'ACDC'
-    dataset: ACDC_dataset = ACDC_dataset()
+    dataset: ACDC_dataset = field(default_factory=ACDC_dataset)
     net: str = 'teds'
-    network: TEDS_Arch = TEDS_Arch()
+    network: TEDS_Arch = field(default_factory=TEDS_Arch)

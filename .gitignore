@@ -34,6 +34,7 @@ __pycache__
 *.npz
 *.txt
 *.pt
+!requirements-server-py39.txt
 
 *.pdf
 *.pkl

@@ -71,19 +71,24 @@ class Parameters:
     epoch: int = 20
     lr: float = 0.0001
     batch: int = 200
+    num_workers: int = 0
     threshold: float = 0.3
+    plot_predictions: bool = True
+    max_train_batches: int = 0
+    max_validation_batches: int = 0
+    max_test_batches: int = 0
 
     # 临时数据目录
     data_path: str = "tmp"
 
     # 损失函数参数
-    loss_params: LossParams = LossParams()
+    loss_params: LossParams = field(default_factory=LossParams)
 
     # 网络超参数
-    network_params: GeneralNet = GeneralNet()
+    network_params: GeneralNet = field(default_factory=GeneralNet)
 
     # 默认网络与数据配置
     net: str = 'teds'
-    network: TEDS_Arch = TEDS_Arch()
+    network: TEDS_Arch = field(default_factory=TEDS_Arch)
     data: str = 'mnist'
-    dataset: MNIST_dataset = MNIST_dataset()
+    dataset: MNIST_dataset = field(default_factory=MNIST_dataset)
