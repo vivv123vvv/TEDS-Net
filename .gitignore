@@ -1,26 +1,26 @@
-# ignore all image files
+﻿# 忽略所有图像文件
 *.mha 
 *.mhd
 *.raw
 *.png
 *.jpeg
 
-# ignore everything in test folder
+# 忽略测试输出目录
 results
 TrainedModel
 tmp
 
 *.zip
-# ignore pycache files
+# 忽略 pycache 文件
 *.pyc
 
-# ignore vscode settings folder
+# 忽略 VS Code 配置目录
 .vscode
 
-# npy arrays
+# 忽略 npy 数组文件
 *.npy
 
-#
+# 其他临时或中间产物
 *.pyc
 __pycache__
 .vscode
@@ -42,5 +42,5 @@ __pycache__
 !docs/papers/
 !docs/papers/*.pdf
 
-# Git ignore:
+# 额外忽略规则
 **/Webpage

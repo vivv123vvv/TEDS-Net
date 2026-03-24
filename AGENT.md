@@ -1,91 +1,96 @@
-# AGENT.md
+﻿# AGENT.md
 
-This file defines repository-wide rules for future agents and collaborators.
+本文件定义当前仓库的全局协作规则，适用于后续所有 agent 与协作者。
 
-## 1. Project Scope
+## 1. 项目定位
 
-- This repository is centered on TEDS-Net: segmentation is produced by deforming an explicit prior shape, not by predicting a mask directly from the image.
-- The current research direction is to keep the "prior shape plus topology-aware deformation" paradigm while replacing the original TEDS-Net topology-preserving integration block with the LC-ResNet module described in the R2Net paper.
-- Unless the user explicitly asks for it, do not turn this project into a standard direct segmentation network.
+- 本仓库以 TEDS-Net 为核心：最终分割结果来自对显式先验形状的形变，而不是直接从图像预测掩码。
+- 当前研究方向是在保留“先验形状 + 拓扑保持形变”这一总体范式的前提下，将原始 TEDS-Net 中的拓扑保持积分模块替换为 R2Net 论文中的 LC-ResNet 模块。
+- 除非用户明确提出要求，不要将该项目改写成普通的直接分割网络。
 
-## 2. Paper References
+## 2. 论文参考
 
-- TEDS-Net paper:
+- TEDS-Net 论文：
   `docs/papers/teds-net-topology-preservation.pdf`
-- R2Net / LC-ResNet paper:
+- R2Net / LC-ResNet 论文：
   `docs/papers/r2net-lc-resnet-diffeomorphic-registration.pdf`
 
-When making structural changes, use these two papers as the primary references. If the implementation intentionally differs from either paper, record the reason in code comments, commit notes, or supporting docs.
+进行结构性改动时，应优先参考这两篇论文。如果实现有意偏离论文描述，必须在代码注释、提交说明或补充文档中写清楚原因。
 
-## 3. Current Code Map
+## 3. 当前代码结构
 
-- `scripts/train_runner.py`: training entry point
-- `scripts/trainer.py`: training, validation, and evaluation flow
-- `scripts/network/TEDS_Net.py`: top-level TEDS-Net assembly
-- `scripts/network/UNet.py`: encoder, bottleneck, decoder, and base network blocks
-- `scripts/network/utils_teds.py`: flow generation, integration, warping, and spatial transform logic
-- `scripts/dataloaders/`: MNIST and ACDC loaders
-- `scripts/parameters/`: dataset and network hyperparameters
-- `scripts/utils/losses.py`: Dice loss and deformation regularization losses
+- `scripts/train_runner.py`：训练入口
+- `scripts/trainer.py`：训练、验证与评估流程
+- `scripts/network/TEDS_Net.py`：TEDS-Net 主体组装
+- `scripts/network/UNet.py`：编码器、瓶颈层、解码器与基础网络模块
+- `scripts/network/utils_teds.py`：位移场生成、积分、形变与空间变换逻辑
+- `scripts/dataloaders/`：MNIST 与 ACDC 数据加载器
+- `scripts/parameters/`：数据与网络超参数
+- `scripts/utils/losses.py`：Dice 损失与形变正则项
 
-If new preprocessing, training, evaluation, or visualization scripts are added, keep responsibilities separated. Do not pack unrelated pipeline stages into one file.
+如果后续新增预处理、训练、评估或可视化脚本，应保持职责拆分清晰，不要把多个阶段混进同一个文件。
 
-## 4. Non-Negotiable Research Constraints
+## 4. 注释与文档语言规则
 
-- Preserve the core pattern: image input plus explicit prior shape input plus deformation of that prior.
-- If LC-ResNet, diffeomorphic, or integrator code is modified, keep these interface assumptions stable:
-  - displacement-field channel count matches spatial dimensionality
-  - `WholeDiffeoUnit` outputs remain compatible with `WarpPriorShape` and the spatial transformer
-  - upsampled flow size matches the transformer grid exactly
-  - coordinate ordering, axis permutation, and `align_corners` behavior are not changed casually
-- Do not silently remove MNIST smoke-test support. It is the smallest regression baseline in this repo.
-- Do not duplicate hard-coded dataset paths, patient splits, or label semantics across files. Prefer a single parameter or configuration source.
+- 仓库中的注释、文档字符串、Markdown 文档、README、协作规则说明，以及 `.gitignore` 中的说明性注释，默认一律使用中文。
+- 后续新增说明性文本时，除非用户明确要求使用其他语言，否则不要写英文说明。
+- 修改已有注释或文档时，应顺手保持中文风格一致，不要在同一文件里混用中英文说明。
 
-## 5. Rules For Experimental Changes
+## 5. 不可破坏的研究约束
 
-- Keep algorithm experiments separate from engineering fixes whenever practical.
-- If a change touches any of the following, state the experiment goal clearly:
-  - prior-shape generation
-  - integrator or deformation layer
-  - loss weights
-  - data slicing, resizing, filtering, or label handling
-  - decoder depth, feature-map count, or branch structure
-- Do not silently change ACDC label semantics. The default assumption is myocardium-only segmentation with label `2`. If multi-class behavior is introduced, document it explicitly.
+- 保留“图像输入 + 显式先验形状输入 + 对先验执行形变”的核心模式。
+- 如果修改 LC-ResNet、diffeomorphic 或 integrator 相关代码，必须保持以下接口语义稳定：
+  - 位移场的通道数必须与空间维度一致
+  - `WholeDiffeoUnit` 的输出必须继续兼容 `WarpPriorShape` 与空间变换器
+  - 上采样后的 flow 尺寸必须与 transformer grid 严格一致
+  - 坐标顺序、轴置换与 `align_corners` 语义不能随意改动
+- 不要悄悄删除 MNIST smoke test，它是仓库中最小的回归验证基线。
+- 不要把数据路径、病人划分和标签定义散落硬编码在多个文件中，应优先集中到参数层或配置层。
 
-## 6. Validation Expectations
+## 6. 实验改动规则
 
-- Any change to network structure or deformation logic should complete at least two of the following when possible:
-  - import or build smoke test
-  - single-batch forward-pass check
-  - tensor-shape verification
-  - CPU/GPU compatibility check
-  - backward-pass or loss propagation check
-  - Jacobian, folding, or topology-related check
-- If training or evaluation cannot be run, say exactly what was not run, why it was not run, and what risk remains.
-- If data preprocessing or dataset splitting changes, document train, validation, and test sources and note any leakage risk.
+- 算法实验与工程修复应尽量分开提交。
+- 如果改动涉及以下内容，必须明确写出实验目的：
+  - 先验形状生成逻辑
+  - 积分器或形变层
+  - loss 权重
+  - 数据切片、缩放、过滤或标签处理
+  - decoder 深度、feature map 数量或分支结构
+- 不要无说明地修改 ACDC 标签语义。当前默认是 myocardium 单类分割，对应标签 `2`；如果扩展为多类任务，必须明确记录。
 
-## 7. Documentation And Traceability
+## 7. 验证要求
 
-- When adding or replacing a paper-derived module, update `README.md` or supporting docs to explain:
-  - what changed
-  - why it changed
-  - where the entry points are
-  - how to validate it
-- Store papers, reports, and experiment notes under `docs/`.
-- If a temporary script becomes part of the workflow, promote it into a clearly named maintained script instead of leaving it as an ad hoc root-level file.
+- 任何涉及网络结构或形变逻辑的改动，在条件允许时至少完成以下两项：
+  - import 或构图 smoke test
+  - 单 batch 前向传播检查
+  - tensor shape 检查
+  - CPU/GPU 兼容性检查
+  - loss 反向传播检查
+  - Jacobian、folding 或 topology 相关检查
+- 如果无法实际运行训练或评估，必须明确说明未运行的内容、未运行原因以及剩余风险。
+- 如果修改了数据预处理或数据集划分逻辑，必须说明 train / validation / test 的来源，并指出是否存在数据泄漏风险。
 
-## 8. Branch And Collaboration Rules
+## 8. 文档与可追溯性
 
-- Keep `main` readable and explainable. Do not mix multiple unrelated research hypotheses into one change without clear justification.
-- Prefer separate branches for new experiments. If Codex creates a branch, use the `codex/` prefix.
-- Do not overwrite or revert user work unless the user explicitly requests it.
+- 新增或替换来自论文的模块时，应同步更新 `README.md` 或补充文档，至少说明：
+  - 改了什么
+  - 为什么改
+  - 入口在哪里
+  - 如何验证
+- 论文、报告与实验记录统一放在 `docs/` 下。
+- 如果临时脚本后来会长期使用，应整理成正式脚本，不要长期以一次性文件形式留在仓库根目录。
 
-## 9. Default Agent Behavior
+## 9. 分支与协作约定
 
-- Protect the research intent before optimizing for superficial "it runs" behavior.
-- When paper behavior and repository behavior differ, identify the difference before editing code.
-- In explanations, distinguish clearly between:
-  - paper intent
-  - current repository behavior
-  - behavior introduced by the latest change
+- `main` 应尽量保持可读、可解释，不要把多个互不相关的研究假设混在同一次提交中。
+- 新实验优先使用独立分支；如果由 Codex 创建分支，使用 `codex/` 前缀。
+- 除非用户明确要求，不要覆盖或回退用户已有的改动。
 
+## 10. 对未来 agent 的默认要求
+
+- 优先保护研究意图，其次才是表面上的“代码能跑”。
+- 发现论文行为与仓库当前实现不一致时，应先定位差异，再动手修改。
+- 在解释问题时，必须清楚区分：
+  - 论文原始意图
+  - 当前仓库的实际行为
+  - 本次修改后引入的行为
