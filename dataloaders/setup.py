@@ -1,56 +1,114 @@
-import os
-from torch.utils.data import DataLoader, random_split
-from dataloaders.acdc_npz import ACDCNpzDataset
+import random
+
+import torch
+from torch.utils.data import DataLoader
 
 
-def setup_acdc_dataloader(params, stages=['train', 'validation', 'test']):
-    # 这里的 datapath 应该指向存放 .npz 文件的目录
-    # 我们假设 params.dataset.datapath 会在 acdc_parameters.py 里被正确设置
-    # 或者我们在这里强制指定预处理后的路径
+def _build_loader_kwargs(batch_size, worker_count, shuffle):
+    worker_count = max(0, int(worker_count))
+    kwargs = {
+        "batch_size": int(batch_size),
+        "shuffle": shuffle,
+        "num_workers": worker_count,
+        "pin_memory": torch.cuda.is_available(),
+        "drop_last": False,
+    }
+    if worker_count > 0:
+        kwargs["persistent_workers"] = True
+    return kwargs
 
-    # 【注意】请确认这个路径是你存放 .npz 文件的路径
-    processed_data_path = "./Resources/database/processed_2d"
 
-    # 实例化完整数据集
-    full_dataset = ACDCNpzDataset(processed_data_path)
+def _single_item_collate(batch):
+    return batch[0]
 
-    # 简单的划分数据集 (70% 训练, 20% 验证, 10% 测试)
-    total_size = len(full_dataset)
-    train_size = int(0.7 * total_size)
-    val_size = int(0.2 * total_size)
-    test_size = total_size - train_size - val_size
 
-    train_set, val_set, test_set = random_split(
-        full_dataset, [train_size, val_size, test_size],
-        generator=torch.Generator().manual_seed(42)
+def _split_acdc_patients(manifest, validation_ratio, seed):
+    training_patients = sorted(
+        {
+            record["patient_id"]
+            for record in manifest["records"]
+            if record["source_subset"] == "training"
+        }
+    )
+    testing_patients = sorted(
+        {
+            record["patient_id"]
+            for record in manifest["records"]
+            if record["source_subset"] == "testing"
+        }
     )
 
-    dataloader_dic = {}
+    if len(training_patients) < 2:
+        raise RuntimeError("ACDC training 病人数不足，无法继续划分训练集与验证集。")
+    if not testing_patients:
+        raise RuntimeError("ACDC testing 样本为空，无法继续评估。")
 
-    if 'train' in stages:
-        dataloader_dic['train'] = DataLoader(
-            train_set,
-            batch_size=params.batch,
-            shuffle=True,
-            num_workers=0,
-            drop_last=True
+    shuffled_patients = list(training_patients)
+    random.Random(seed).shuffle(shuffled_patients)
+    validation_count = max(1, int(len(shuffled_patients) * validation_ratio))
+    validation_count = min(validation_count, len(shuffled_patients) - 1)
+
+    validation_patients = sorted(shuffled_patients[:validation_count])
+    train_patients = sorted(shuffled_patients[validation_count:])
+    return {
+        "train": train_patients,
+        "validation": validation_patients,
+        "test": testing_patients,
+    }
+
+
+def _filter_records(records, patient_ids, source_subset):
+    patient_lookup = set(patient_ids)
+    return [
+        record
+        for record in records
+        if record["source_subset"] == source_subset and record["patient_id"] in patient_lookup
+    ]
+
+
+def setup_acdc_dataloader(params, stages=None):
+    from dataloaders.ACDC import ACDC_dataclass
+
+    if stages is None:
+        stages = ["train", "validation", "test"]
+
+    manifest = ACDC_dataclass.get_manifest(params.dataset.processed_data_path)
+    split_patients = _split_acdc_patients(
+        manifest=manifest,
+        validation_ratio=params.dataset.validation_ratio,
+        seed=params.seed,
+    )
+    records = manifest["records"]
+
+    train_records = _filter_records(records, split_patients["train"], source_subset="training")
+    validation_records = _filter_records(records, split_patients["validation"], source_subset="training")
+    test_records = _filter_records(records, split_patients["test"], source_subset="testing")
+
+    params.acdc_manifest_summary = manifest["summary"]
+    params.acdc_split_counts = {
+        "train_patients": len(split_patients["train"]),
+        "validation_patients": len(split_patients["validation"]),
+        "test_patients": len(split_patients["test"]),
+        "train_slices": len(train_records),
+        "validation_slices": len(validation_records),
+        "test_slices": len(test_records),
+    }
+
+    dataloader_dict = {}
+    if "train" in stages:
+        dataloader_dict["train"] = DataLoader(
+            ACDC_dataclass(params, train_records, subset="Train", return_metadata=False),
+            **_build_loader_kwargs(params.batch, params.num_workers, shuffle=True),
         )
-
-    if 'validation' in stages:
-        dataloader_dic['validation'] = DataLoader(
-            val_set,
-            batch_size=params.batch,
-            shuffle=False,
-            num_workers=0,
-            drop_last=True  # 避免只有1个样本导致 BatchNorm 报错
+    if "validation" in stages:
+        dataloader_dict["validation"] = DataLoader(
+            ACDC_dataclass(params, validation_records, subset="Validation", return_metadata=False),
+            **_build_loader_kwargs(params.batch, params.num_workers, shuffle=False),
         )
-
-    if 'test' in stages:
-        dataloader_dic['test'] = DataLoader(
-            test_set,
-            batch_size=1,
-            shuffle=False,
-            num_workers=0
+    if "test" in stages:
+        dataloader_dict["test"] = DataLoader(
+            ACDC_dataclass(params, test_records, subset="Test", return_metadata=True),
+            collate_fn=_single_item_collate,
+            **_build_loader_kwargs(params.eval_batch, params.num_workers, shuffle=False),
         )
-
-    return dataloader_dic
+    return dataloader_dict

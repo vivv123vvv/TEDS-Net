@@ -1,0 +1,9 @@
+numpy==1.26.4
+tqdm==4.67.1
+matplotlib==3.9.4
+raster-geometry==0.1.4.2
+dataclasses-json==0.6.7
+enforce-typing==1.0.0.post1
+nibabel==5.3.2
+scipy==1.13.1
+scikit-image==0.24.0

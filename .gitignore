@@ -1,46 +1,40 @@
-﻿# 忽略所有图像文件
-*.mha 
+# 忽略医学影像原始数据与中间图像
+*.mha
 *.mhd
 *.raw
 *.png
 *.jpeg
 
-# 忽略测试输出目录
+# 忽略训练输出目录
 results
 TrainedModel
 tmp
 
 *.zip
-# 忽略 pycache 文件
 *.pyc
-
-# 忽略 VS Code 配置目录
-.vscode
-
-# 忽略 npy 数组文件
-*.npy
-
-# 其他临时或中间产物
-*.pyc
-__pycache__
-.vscode
-.odt
-*.png
-*__pycache__*
-*.mha
-*.pyc
-*tmp/
 *.npy
 *.npz
 *.txt
 *.pt
-
-*.pdf
 *.pkl
 
+__pycache__
+*__pycache__*
+.vscode
+.odt
+
+*.pdf
+
+!requirements-server-py39.txt
 !docs/
 !docs/papers/
 !docs/papers/*.pdf
+!docs/experiments/
+!docs/experiments/acdc_batch200_report.md
+!docs/experiments/assets/
+!docs/experiments/assets/acdc_batch200/
+!docs/experiments/assets/acdc_batch200/.gitkeep
+!docs/experiments/assets/acdc_batch200/*.png
 
 # 额外忽略规则
 **/Webpage

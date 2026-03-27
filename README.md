@@ -1,8 +1,8 @@
-﻿## TEDS-Net 实现说明 ##
+## TEDS-Net 实现说明 ##
 
 本仓库实现了 MICCAI 2021 论文《TEDS-Net: Enforcing Diffeomorphisms in Spatial Transformers to Guarantee Topology Preservation in Segmentations》中描述的 TEDS-Net 架构。
 
-2023 年 1 月更新后的代码额外提供了一个简化训练脚本，可基于模拟 MNIST 数据集完成数字 `0` 的分割训练。同时仓库中也包含了 ACDC 训练使用的参数文件，先验形状生成逻辑位于数据加载器中。如果你要运行 ACDC 示例，请先修改超参数文件和数据加载器中的数据路径。
+当前分支保留了原始 `preprocess_acdc.py`、`trainACDC.py`、`evaluate_results.py` 与 `visualize.py` 这一条 ACDC 运行链路，并补齐了官方数据划分、批量训练、完整评估指标、报告导出与可视化导出能力。
 
 --------------- 模拟示例 ---------------
 
@@ -10,16 +10,55 @@
 
 运行：
 
->> train_runner.py
+```bash
+python scripts/train_runner.py --dataset mnist
+```
 
-将训练 TEDS-Net 共 20 个 epoch，通常不会超过 1 分钟。
-
-训练结束后，终端会输出类似下面的最终测试 Dice 结果：
-
- >> - - - - - - - - - - - - - - - - - - - ----------------------
- >> Test Dice Loss: 0.9272134661674499 +/- 0.004152349107265217
- >> - - - - - - - - - - - - - - - - - - - -----------------------
+训练结束后，终端会输出最终测试 Dice 结果。
 
 ![MNIST 示例结果](https://github.com/mwyburd/TEDS-Net/blob/main/MNIST_0_Example.png "MNIST 示例结果")
 
-上图展示了 MNIST 图像、先验形状 `P`，以及 TEDS-Net 在训练 20 个 epoch 后得到的分割结果。
+--------------- ACDC 运行 ---------------
+
+1. 预处理官方 ACDC 数据集：
+
+```bash
+python preprocess_acdc.py ^
+  --raw-data-path Resources ^
+  --processed-data-path results/preprocessed/acdc_ring_144x208
+```
+
+2. 训练 ACDC 模型，例如 `batch=200`：
+
+```bash
+python trainACDC.py ^
+  --processed-data-path results/preprocessed/acdc_ring_144x208 ^
+  --run-name acdc_batch200 ^
+  --epochs 200 ^
+  --batch-size 200 ^
+  --num-workers 0
+```
+
+3. 评估并导出报告：
+
+```bash
+python evaluate_results.py ^
+  --processed-data-path results/preprocessed/acdc_ring_144x208 ^
+  --run-name acdc_batch200
+```
+
+4. 如需单独重导可视化：
+
+```bash
+python visualize.py ^
+  --processed-data-path results/preprocessed/acdc_ring_144x208 ^
+  --run-name acdc_batch200
+```
+
+评估后会生成以下产物：
+
+- 运行目录：`results/acdc/<run_name>/`
+- 汇总指标：`results/acdc/<run_name>/metrics/summary_metrics.json`
+- 逐切片指标：`results/acdc/<run_name>/metrics/per_slice_metrics.json`
+- Markdown 报告：`docs/experiments/acdc_batch200_report.md`
+- 精选可视化：`docs/experiments/assets/acdc_batch200/*.png`
