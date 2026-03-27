@@ -4,20 +4,25 @@
 
 ## 实验概览
 
-- 生成时间：2026-03-27 12:19:25
-- 分支：`codex/acdc-server-run`
-- 提交：`7780064e3e46a2722b6714c6a7ade96998d9d943`
-- 运行名：`acdc_batch200_20260327_1110`
+- 生成时间：2026-03-27 16:54:51
+- 分支：`acdc_run_260126`
+- 提交：`1ddef343e551b09b1912e487ffe46a5b98a52674`
+- 运行名：`acdc_batch200_20260327_1600`
 - 原始数据目录：`/mydisk/202b/fmw/projects/Resources`
-- 预处理缓存目录：`/mydisk/202b/fmw/acdc_batch200_20260327_1110/processed/acdc_ring_144x208`
-- 结果目录：`/mydisk/202b/fmw/acdc_batch200_20260327_1110/repo/results/acdc/acdc_batch200_20260327_1110`
-- 训练命令：`python scripts/train_runner.py --dataset ACDC --raw-data-path /mydisk/202b/fmw/projects/Resources --processed-data-path /mydisk/202b/fmw/acdc_batch200_20260327_1110/processed/acdc_ring_144x208 --run-name acdc_batch200_20260327_1110 --epochs 200 --batch-size 200 --num-workers '0'`
+- 预处理缓存目录：`/mydisk/202b/fmw/acdc_batch200_20260327_1600/processed/acdc_ring_144x208`
+- 结果目录：`/mydisk/202b/fmw/acdc_batch200_20260327_1600/outputs/acdc_batch200_20260327_1600`
+- 最佳模型：`/mydisk/202b/fmw/acdc_batch200_20260327_1600/outputs/acdc_batch200_20260327_1600/checkpoints/best.pt`
+- 训练命令：`python /mydisk/202b/fmw/acdc_batch200_20260327_1600/repo/trainACDC.py --raw-data-path /mydisk/202b/fmw/projects/Resources --processed-data-path /mydisk/202b/fmw/acdc_batch200_20260327_1600/processed/acdc_ring_144x208 --output-root /mydisk/202b/fmw/acdc_batch200_20260327_1600/outputs --run-name acdc_batch200_20260327_1600 --epochs 200 --batch-size 200 --num-workers 0`
+- 评估命令：`python /mydisk/202b/fmw/acdc_batch200_20260327_1600/repo/evaluate_results.py --raw-data-path /mydisk/202b/fmw/projects/Resources --processed-data-path /mydisk/202b/fmw/acdc_batch200_20260327_1600/processed/acdc_ring_144x208 --output-root /mydisk/202b/fmw/acdc_batch200_20260327_1600/outputs --run-name acdc_batch200_20260327_1600 --num-workers 0`
 - 设备：`cuda:0`
 
-## 训练配置
+## 数据划分与训练配置
 
+- 数据划分策略：官方 `training/testing` 划分；仅在 `training` 内按病人切分训练集与验证集。
+- 数据泄漏风险说明：训练、验证、测试之间不共享病人；不再使用随机切片混拆。
 - epoch：200
 - batch size：200
+- 最佳 epoch：191
 - 训练病人数：90
 - 验证病人数：10
 - 测试病人数：50
@@ -56,15 +61,19 @@
 }
 ```
 
-## 测试集指标
+## 主结果表
+
+| Dice ↑ | HD ↓ | Correct topology ↑ | Time per epoch [min] ↓ | # Parameters [x10^5] |
+| --- | --- | --- | --- | --- |
+| 0.5009 +/- 0.2322 | 29.2235 +/- 36.8031 | 86.42% | 0.16 | 7.09 |
+
+## 补充指标
 
 | 指标 | 数值 |
 | --- | --- |
-| Dice | 0.5362 +/- 0.2434 |
-| HD95 | 20.4583 +/- 26.8237 |
-| ASSD | 5.5707 +/- 6.4537 |
-| 拓扑保持率 | 0.7953 |
-| Jacobian folding 比率 | 0.1051 +/- 0.0268 |
+| HD95 | 23.8155 +/- 33.4740 |
+| ASSD | 6.4822 +/- 7.9763 |
+| Jacobian folding 比率 | 0.1308 +/- 0.0307 |
 
 ## 可视化样例
 
@@ -72,53 +81,57 @@
 
 ### Dice 最好
 
-- 样本：`patient104_frame11_slice002`
-- Dice：0.9124
-- HD95：3.8670
-- ASSD：1.4625
+- 样本：`patient105_frame10_slice003`
+- Dice：0.9029
+- HD：6.6383
+- HD95：5.3520
+- ASSD：1.7584
 - GT Betti：`(1, 1)`
 - Pred Betti：`(1, 2)`
-- Folding Ratio：0.086872
+- Folding Ratio：0.124624
 
-![Dice 最好](assets/acdc_batch200/best_patient104_frame11_slice002.png)
+![Dice 最好](assets/acdc_batch200/best_patient105_frame10_slice003.png)
 
 ### Dice 中位
 
-- 样本：`patient148_frame10_slice003`
-- Dice：0.6144
-- HD95：4.6940
-- ASSD：2.3277
+- 样本：`patient126_frame01_slice011`
+- Dice：0.5485
+- HD：9.0616
+- HD95：6.0670
+- ASSD：1.4644
 - GT Betti：`(1, 1)`
 - Pred Betti：`(1, 1)`
-- Folding Ratio：0.097489
+- Folding Ratio：0.169705
 
-![Dice 中位](assets/acdc_batch200/median_patient148_frame10_slice003.png)
+![Dice 中位](assets/acdc_batch200/median_patient126_frame01_slice011.png)
 
 ### Dice 最差
 
-- 样本：`patient112_frame01_slice009`
+- 样本：`patient109_frame01_slice006`
 - Dice：0.0000
-- HD95：134.1567
-- ASSD：48.8668
+- HD：82.5024
+- HD95：70.9309
+- ASSD：28.7601
 - GT Betti：`(1, 1)`
 - Pred Betti：`(1, 1)`
-- Folding Ratio：0.075137
+- Folding Ratio：0.145466
 
-![Dice 最差](assets/acdc_batch200/worst_patient112_frame01_slice009.png)
+![Dice 最差](assets/acdc_batch200/worst_patient109_frame01_slice006.png)
 
 ### 固定随机样本
 
-- 样本：`patient134_frame01_slice007`
-- Dice：0.7597
-- HD95：3.2318
-- ASSD：1.2480
+- 样本：`patient134_frame01_slice008`
+- Dice：0.6872
+- HD：5.2111
+- HD95：4.0880
+- ASSD：1.4677
 - GT Betti：`(1, 1)`
 - Pred Betti：`(1, 1)`
-- Folding Ratio：0.074302
+- Folding Ratio：0.130108
 
-![固定随机样本](assets/acdc_batch200/random_patient134_frame01_slice007.png)
+![固定随机样本](assets/acdc_batch200/random_patient134_frame01_slice008.png)
 
 ## 结论
 
-- 本报告同时给出分割精度、距离误差、结果拓扑与形变 folding 两条稳定性证据。
-- 如果后续继续对积分器或先验形状做实验，应优先对比本报告中的 Dice/HD95/ASSD 与拓扑保持率是否同步变化。
+- 主表按照图表口径给出 Dice、HD、拓扑保持率、单 epoch 耗时和参数量，便于与基线直接横向对比。
+- 报告同时补充 HD95、ASSD 与 Jacobian folding 比率，帮助判断精度、边界误差与形变稳定性是否同步变化。
