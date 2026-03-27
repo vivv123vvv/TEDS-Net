@@ -7,6 +7,7 @@ import math
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions.normal import Normal
+from torch.nn.utils import spectral_norm
 import torchvision.transforms.functional as FF
 from network.UNet import ConvBlock, EncoderBranch, DecoderBranch, BottleNeck
 
@@ -37,6 +38,8 @@ class WholeDiffeoUnit(nn.Module):
         self.Guas_kernel = params.network.Guas_kernel
         self.Guas_P = params.network.sigma
         self.mega_P = params.network.mega_P
+        self.integrator_name = getattr(params.network, 'integrator', 'scaling_squaring')
+        self.r2net_blocks = getattr(params.network, 'r2net_blocks', 7)
 
         # 构建解码器输出
         self.dec = DecoderBranch(features=self.features, ndims=self.ndims, net_depth=self.net_depth, dec_depth=self.dec_depth, dropout=self.dropout)
@@ -51,7 +54,18 @@ class WholeDiffeoUnit(nn.Module):
         self.gen_field = GenDisField(self.dec_depth, self.features, self.ndims)
 
         # 2. 应用可微分积分设置
-        self.diffeo_field = DiffeoUnit(self.flow_field_size, self.Mega_inshape, self.int_steps, self.viscous, self.Guas_kernel, self.Guas_P, self.mega_P)
+        self.flow_integrator = build_flow_integrator(
+            integrator_name=self.integrator_name,
+            flow_field_size=self.flow_field_size,
+            mega_size=self.Mega_inshape,
+            int_steps=self.int_steps,
+            viscous=self.viscous,
+            Guas_kernel=self.Guas_kernel,
+            Guas_P=self.Guas_P,
+            mega_P=self.mega_P,
+            ndims=self.ndims,
+            r2net_blocks=self.r2net_blocks,
+        )
         # 3. 将位移应用到先验形状
         self.transformer = mw_SpatialTransformer(self.Mega_inshape)
 
@@ -59,10 +73,91 @@ class WholeDiffeoUnit(nn.Module):
         # 计算解码器输出
         dec_output = self.dec(BottleNeck, enc_outputs)
         flow_field = self.gen_field(dec_output)
-        flow_upsamp = self.diffeo_field(flow_field, self.act, self.viscous, self.ndims)
+        flow_upsamp = self.flow_integrator(flow_field, self.act, self.viscous, self.ndims)
         sampled = WarpPriorShape(self, prior_shape, flow_upsamp)
 
         return flow_field, flow_upsamp, sampled
+
+
+def build_flow_integrator(
+    integrator_name,
+    flow_field_size,
+    mega_size,
+    int_steps,
+    viscous,
+    Guas_kernel,
+    Guas_P,
+    mega_P,
+    ndims,
+    r2net_blocks,
+):
+    """根据配置选择积分器实现。"""
+
+    if integrator_name == 'scaling_squaring':
+        return DiffeoUnit(
+            flow_field_size,
+            mega_size,
+            int_steps=int_steps,
+            viscous=viscous,
+            Guas_kernel=Guas_kernel,
+            Guas_P=Guas_P,
+            mega_P=mega_P,
+        )
+    if integrator_name == 'r2net_lc_resnet':
+        return R2NetFlowIntegrator(
+            flow_field_size,
+            mega_size,
+            ndims=ndims,
+            n_blocks=r2net_blocks,
+        )
+    raise ValueError(f'不支持的积分器: {integrator_name}')
+
+
+class LC_ResNet_Block(nn.Module):
+    """R2Net 的 LC-ResNet 残差块。"""
+
+    def __init__(self, ndims):
+        super().__init__()
+
+        if ndims == 2:
+            Conv = nn.Conv2d
+        elif ndims == 3:
+            Conv = nn.Conv3d
+        else:
+            raise RuntimeError(f'仅支持 2D/3D，收到 ndims={ndims}')
+
+        self.conv1 = spectral_norm(Conv(ndims, ndims, kernel_size=3, padding=1, stride=1, bias=False))
+        self.relu = nn.LeakyReLU(0.2)
+        self.conv2 = spectral_norm(Conv(ndims, ndims, kernel_size=1, padding=0, stride=1, bias=False))
+        self.tanh = nn.Tanh()
+
+    def forward(self, x):
+        residual = self.conv1(x)
+        residual = self.relu(residual)
+        residual = self.conv2(residual)
+        residual = self.tanh(residual) / 2.0
+        return x + residual
+
+
+class R2NetFlowIntegrator(nn.Module):
+    """使用 LC-ResNet 残差块替代 scaling and squaring。"""
+
+    def __init__(self, flow_field_size, mega_size, ndims, n_blocks=7):
+        super().__init__()
+        self.Mega_inshape = mega_size
+        modes = {2: 'bilinear', 3: 'trilinear'}
+        self.blocks = nn.ModuleList([LC_ResNet_Block(ndims) for _ in range(n_blocks)])
+        self.upsample = nn.Upsample(
+            size=self.Mega_inshape,
+            mode=modes[len(flow_field_size)],
+            align_corners=False,
+        )
+
+    def forward(self, flow_field, *_):
+        velocity = flow_field / 2.0
+        for block in self.blocks:
+            velocity = block(velocity)
+        return self.upsample(velocity)
 
 
 class GenDisField(nn.Module):

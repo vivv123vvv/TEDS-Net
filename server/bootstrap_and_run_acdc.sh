@@ -1,16 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ENV_NAME="${ENV_NAME:-tedsnet_py39}"
+ENV_NAME="${ENV_NAME:-tedsnet_py39_acdc}"
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DATA_DIR="${DATA_DIR:-${PROJECT_ROOT}/Resources}"
+RAW_DATA_DIR="${RAW_DATA_DIR:-${PROJECT_ROOT}/Resources}"
+PROCESSED_DATA_DIR="${PROCESSED_DATA_DIR:-${PROJECT_ROOT}/results/preprocessed/acdc_ring_144x208}"
+RUN_NAME="${RUN_NAME:-acdc_batch200}"
 TORCH_INDEX_URL="${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cu121}"
 BATCH_SIZE="${BATCH_SIZE:-200}"
 NUM_WORKERS="${NUM_WORKERS:-0}"
-EPOCHS="${EPOCHS:-1}"
-MAX_TRAIN_BATCHES="${MAX_TRAIN_BATCHES:-1}"
-MAX_VALIDATION_BATCHES="${MAX_VALIDATION_BATCHES:-1}"
-MAX_TEST_BATCHES="${MAX_TEST_BATCHES:-1}"
+EPOCHS="${EPOCHS:-200}"
+MAX_TRAIN_BATCHES="${MAX_TRAIN_BATCHES:-0}"
+MAX_VALIDATION_BATCHES="${MAX_VALIDATION_BATCHES:-0}"
+MAX_TEST_BATCHES="${MAX_TEST_BATCHES:-0}"
+FORCE_PREPROCESS="${FORCE_PREPROCESS:-0}"
 
 if ! command -v module >/dev/null 2>&1; then
     if [ -f /etc/profile ]; then
@@ -49,13 +52,34 @@ nvidia-smi
 
 python -c "import torch; assert torch.cuda.is_available(), 'GPU unavailable; stop as required.'; print('torch version:', torch.__version__); print('cuda available:', torch.cuda.is_available()); print('gpu count:', torch.cuda.device_count()); print('current device:', torch.cuda.get_device_name(0))"
 
-python "${PROJECT_ROOT}/scripts/train_runner.py" \
-    --dataset ACDC \
-    --epochs "${EPOCHS}" \
-    --batch-size "${BATCH_SIZE}" \
-    --num-workers "${NUM_WORKERS}" \
-    --data-path "${DATA_DIR}" \
-    --max-train-batches "${MAX_TRAIN_BATCHES}" \
-    --max-validation-batches "${MAX_VALIDATION_BATCHES}" \
-    --max-test-batches "${MAX_TEST_BATCHES}" \
-    --skip-plot
+PREPROCESS_ARGS=()
+if [ "${FORCE_PREPROCESS}" = "1" ]; then
+    PREPROCESS_ARGS+=("--force")
+fi
+
+python "${PROJECT_ROOT}/scripts/preprocess_acdc.py" \
+    --raw-data-path "${RAW_DATA_DIR}" \
+    --processed-data-path "${PROCESSED_DATA_DIR}" \
+    "${PREPROCESS_ARGS[@]}"
+
+TRAIN_ARGS=(
+    --dataset ACDC
+    --raw-data-path "${RAW_DATA_DIR}"
+    --processed-data-path "${PROCESSED_DATA_DIR}"
+    --run-name "${RUN_NAME}"
+    --epochs "${EPOCHS}"
+    --batch-size "${BATCH_SIZE}"
+    --num-workers "${NUM_WORKERS}"
+)
+
+if [ "${MAX_TRAIN_BATCHES}" != "0" ]; then
+    TRAIN_ARGS+=(--max-train-batches "${MAX_TRAIN_BATCHES}")
+fi
+if [ "${MAX_VALIDATION_BATCHES}" != "0" ]; then
+    TRAIN_ARGS+=(--max-validation-batches "${MAX_VALIDATION_BATCHES}")
+fi
+if [ "${MAX_TEST_BATCHES}" != "0" ]; then
+    TRAIN_ARGS+=(--max-test-batches "${MAX_TEST_BATCHES}")
+fi
+
+python "${PROJECT_ROOT}/scripts/train_runner.py" "${TRAIN_ARGS[@]}"

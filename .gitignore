@@ -42,6 +42,12 @@ __pycache__
 !docs/
 !docs/papers/
 !docs/papers/*.pdf
+!docs/experiments/
+!docs/experiments/acdc_batch200_report.md
+!docs/experiments/assets/
+!docs/experiments/assets/acdc_batch200/
+!docs/experiments/assets/acdc_batch200/.gitkeep
+!docs/experiments/assets/acdc_batch200/*.png
 
 # 额外忽略规则
 **/Webpage
