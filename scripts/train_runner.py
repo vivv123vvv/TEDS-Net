@@ -60,6 +60,8 @@ class TrainRunner:
             params.batch = args.batch_size
         if args.num_workers is not None:
             params.num_workers = args.num_workers
+        if args.seed is not None:
+            params.seed = args.seed
         if args.max_train_batches is not None:
             params.max_train_batches = args.max_train_batches
         if args.max_validation_batches is not None:
@@ -123,6 +125,7 @@ if __name__ == "__main__":
     parser.add_argument("--epochs", type=int, help="覆盖默认训练轮数。")
     parser.add_argument("--batch-size", type=int, dest="batch_size", help="覆盖默认 batch size。")
     parser.add_argument("--num-workers", type=int, help="覆盖 DataLoader worker 数量。")
+    parser.add_argument("--seed", type=int, help="覆盖默认随机种子。")
     parser.add_argument("--data-path", help="兼容旧接口：MNIST 的数据目录，或 ACDC 的 processed_data_path。")
     parser.add_argument("--raw-data-path", help="ACDC 原始数据目录。")
     parser.add_argument("--processed-data-path", help="ACDC 预处理缓存目录。")

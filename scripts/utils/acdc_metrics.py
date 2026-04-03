@@ -45,18 +45,18 @@ def _surface_mask(binary_mask):
     return np.logical_xor(binary_mask, eroded)
 
 
-def compute_hd95_and_assd(pred_mask, target_mask, spacing):
-    """计算 HD95 与 ASSD。"""
+def compute_distance_metrics(pred_mask, target_mask, spacing):
+    """计算 HD、HD95 与 ASSD。"""
 
     pred_mask = pred_mask.astype(bool)
     target_mask = target_mask.astype(bool)
 
     if not pred_mask.any() and not target_mask.any():
-        return 0.0, 0.0
+        return 0.0, 0.0, 0.0
 
     if not pred_mask.any() or not target_mask.any():
         fallback = failure_distance(pred_mask.shape, spacing)
-        return fallback, fallback
+        return fallback, fallback, fallback
 
     pred_surface = _surface_mask(pred_mask)
     target_surface = _surface_mask(target_mask)
@@ -68,16 +68,17 @@ def compute_hd95_and_assd(pred_mask, target_mask, spacing):
     target_to_pred = pred_distance[target_surface]
     distances = np.concatenate([pred_to_target, target_to_pred])
 
+    hd = float(np.max(distances))
     hd95 = float(np.percentile(distances, 95))
     assd = float((pred_to_target.mean() + target_to_pred.mean()) / 2.0)
-    return hd95, assd
+    return hd, hd95, assd
 
 
 def jacobian_determinant_2d(flow):
     """计算二维归一化位移场的 Jacobian determinant。"""
 
     if flow.shape[0] != 2:
-        raise ValueError(f"仅支持二维 flow，收到形状: {flow.shape}")
+        raise ValueError(f"仅支持二维 flow，收到形状 {flow.shape}")
 
     height, width = flow.shape[1:]
     spacing_y = 2.0 / max(height - 1, 1)
@@ -106,11 +107,11 @@ def _normalized_grid(flow):
 
 
 def compose_backward_flows(first_flow, second_flow):
-    """复合 backward warping flow，使其等价于 warp(warp(src, first), second)。"""
+    """组合 backward warping flow。"""
 
     if first_flow.shape != second_flow.shape:
         raise ValueError(
-            f"待复合 flow 形状不一致: first={first_flow.shape}, second={second_flow.shape}"
+            f"待组合 flow 形状不一致: first={first_flow.shape}, second={second_flow.shape}"
         )
 
     grid = _normalized_grid(second_flow)
@@ -124,3 +125,67 @@ def compose_backward_flows(first_flow, second_flow):
         align_corners=True,
     )
     return second_flow + sampled_first
+
+
+def project_probability_to_annulus(
+    probability,
+    pose_params,
+    base_outer_radius,
+    base_inner_radius,
+    margin,
+    threshold=0.5,
+    num_angles=128,
+):
+    """将概率图投影到最近的单环形状。"""
+
+    probability = np.asarray(probability, dtype=np.float32)
+    height, width = probability.shape
+
+    tx, ty, outer_scale, inner_scale = [float(v) for v in pose_params]
+    centre_x = ((tx + 1.0) * 0.5) * (width - 1)
+    centre_y = ((ty + 1.0) * 0.5) * (height - 1)
+
+    predicted_outer = np.clip(base_outer_radius * outer_scale, margin + 2.0, min(height, width) / 2 - 1.0)
+    predicted_inner = np.clip(base_inner_radius * inner_scale, 1.0, predicted_outer - margin)
+
+    max_radius = max(8, min(height, width) // 2 - 1)
+    radii = np.arange(max_radius, dtype=np.float32)
+    angles = np.linspace(-math.pi, math.pi, num_angles, endpoint=False, dtype=np.float32)
+
+    x = centre_x + np.cos(angles)[:, None] * radii[None, :]
+    y = centre_y + np.sin(angles)[:, None] * radii[None, :]
+    polar_prob = ndimage.map_coordinates(
+        probability,
+        [y, x],
+        order=1,
+        mode="nearest",
+    )
+
+    inner_radii = np.full(num_angles, predicted_inner, dtype=np.float32)
+    outer_radii = np.full(num_angles, predicted_outer, dtype=np.float32)
+
+    for angle_index in range(num_angles):
+        active = np.flatnonzero(polar_prob[angle_index] >= threshold)
+        if active.size == 0:
+            continue
+        inner_radii[angle_index] = float(active[0])
+        outer_radii[angle_index] = float(active[-1])
+
+    inner_radii = ndimage.gaussian_filter1d(inner_radii, sigma=2.0, mode="wrap")
+    outer_radii = ndimage.gaussian_filter1d(outer_radii, sigma=2.0, mode="wrap")
+    inner_radii = np.clip(inner_radii, 1.0, max_radius - margin - 1.0)
+    outer_radii = np.maximum(outer_radii, inner_radii + margin)
+    outer_radii = np.clip(outer_radii, inner_radii + margin, max_radius - 1.0)
+
+    yy, xx = np.meshgrid(np.arange(height, dtype=np.float32), np.arange(width, dtype=np.float32), indexing="ij")
+    distance = np.sqrt((yy - centre_y) ** 2 + (xx - centre_x) ** 2)
+    theta = np.arctan2(yy - centre_y, xx - centre_x)
+
+    extended_angles = np.concatenate([angles - 2.0 * math.pi, angles, angles + 2.0 * math.pi])
+    extended_inner = np.tile(inner_radii, 3)
+    extended_outer = np.tile(outer_radii, 3)
+    inner_map = np.interp(theta.reshape(-1), extended_angles, extended_inner).reshape(height, width)
+    outer_map = np.interp(theta.reshape(-1), extended_angles, extended_outer).reshape(height, width)
+
+    projected = np.logical_and(distance >= inner_map, distance <= outer_map).astype(np.float32)
+    return projected

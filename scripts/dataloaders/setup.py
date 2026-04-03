@@ -122,10 +122,11 @@ def setup_acdc_dataloader(params, subset_list):
         )
 
     if "validation" in subset_list:
-        validation_set = MyDataset(params, validation_records, subset="Validation", return_metadata=False)
+        validation_set = MyDataset(params, validation_records, subset="Validation", return_metadata=True)
         dataloader_dict["validation"] = DataLoader(
             validation_set,
-            **_build_loader_kwargs(params.batch, params.num_workers, shuffle=False),
+            collate_fn=_single_item_collate,
+            **_build_loader_kwargs(1, params.num_workers, shuffle=False),
         )
 
     if "test" in subset_list:

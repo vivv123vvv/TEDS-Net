@@ -16,7 +16,7 @@ def write_acdc_report(report_path, context, summary_metrics, visualization_entri
     split_counts = context.get("split_counts", {})
 
     lines = [
-        "# ACDC Batch=200 实验报告",
+        "# ACDC LC-ResNet 拓扑替换实验报告",
         "",
         "> 本文件由评估流程自动生成；若重复运行，会被新的实验结果覆盖。",
         "",
@@ -36,6 +36,7 @@ def write_acdc_report(report_path, context, summary_metrics, visualization_entri
         "",
         f"- epoch：{context['epochs']}",
         f"- batch size：{context['batch_size']}",
+        f"- 评估 threshold：{summary_metrics.get('selected_threshold', context.get('threshold', 0.3)):.2f}",
         f"- 训练病人数：{split_counts.get('train_patients', 'unknown')}",
         f"- 验证病人数：{split_counts.get('validation_patients', 'unknown')}",
         f"- 测试病人数：{split_counts.get('test_patients', 'unknown')}",
@@ -49,15 +50,25 @@ def write_acdc_report(report_path, context, summary_metrics, visualization_entri
         json.dumps(context["preprocess_summary"], ensure_ascii=False, indent=2),
         "```",
         "",
-        "## 测试集指标",
+        "## 主结果表",
+        "",
+        "| Dice ↑ | HD ↓ | HD95 ↓ | Correct topology ↑ | Jacobian folding ↓ |",
+        "| --- | --- | --- | --- | --- |",
+        (
+            f"| {_format_metric(summary_metrics['dice_mean'], summary_metrics['dice_std'])}"
+            f" | {_format_metric(summary_metrics['hd_mean'], summary_metrics['hd_std'])}"
+            f" | {_format_metric(summary_metrics['hd95_mean'], summary_metrics['hd95_std'])}"
+            f" | {summary_metrics['topology_keep_rate'] * 100.0:.2f}%"
+            f" | {_format_metric(summary_metrics['folding_ratio_mean'], summary_metrics['folding_ratio_std'])} |"
+        ),
+        "",
+        "## 补充指标",
         "",
         "| 指标 | 数值 |",
         "| --- | --- |",
-        f"| Dice | {_format_metric(summary_metrics['dice_mean'], summary_metrics['dice_std'])} |",
-        f"| HD95 | {_format_metric(summary_metrics['hd95_mean'], summary_metrics['hd95_std'])} |",
         f"| ASSD | {_format_metric(summary_metrics['assd_mean'], summary_metrics['assd_std'])} |",
-        f"| 拓扑保持率 | {_format_metric(summary_metrics['topology_keep_rate'])} |",
-        f"| Jacobian folding 比率 | {_format_metric(summary_metrics['folding_ratio_mean'], summary_metrics['folding_ratio_std'])} |",
+        f"| 评估切片数 | {summary_metrics['num_cases']} |",
+        f"| 投影修正次数 | {summary_metrics.get('projection_count', 0)} |",
         "",
         "## 可视化样例",
         "",
@@ -72,6 +83,7 @@ def write_acdc_report(report_path, context, summary_metrics, visualization_entri
                 "",
                 f"- 样本：`{entry['sample_id']}`",
                 f"- Dice：{entry['dice']:.4f}",
+                f"- HD：{entry['hd']:.4f}",
                 f"- HD95：{entry['hd95']:.4f}",
                 f"- ASSD：{entry['assd']:.4f}",
                 f"- GT Betti：`{tuple(entry['gt_betti'])}`",
@@ -87,8 +99,8 @@ def write_acdc_report(report_path, context, summary_metrics, visualization_entri
         [
             "## 结论",
             "",
-            "- 本报告同时给出分割精度、距离误差、结果拓扑与形变 folding 两条稳定性证据。",
-            "- 如果后续继续对积分器或先验形状做实验，应优先对比本报告中的 Dice/HD95/ASSD 与拓扑保持率是否同步变化。",
+            "- 本报告同时给出 Dice、HD、HD95、ASSD、拓扑保持率与 Jacobian folding，便于横向比较精度和形变稳定性。",
+            "- 如果后续继续对 LC-ResNet 约束组合器做实验，应优先比较拓扑正确率是否在 Dice 提升的同时保持稳定。",
             "",
         ]
     )

@@ -1,4 +1,5 @@
 import json
+import math
 import os
 from glob import glob
 
@@ -6,6 +7,7 @@ import nibabel as nib
 import numpy as np
 import torch
 import torch.nn.functional as F
+from scipy import ndimage
 from skimage import measure
 
 
@@ -23,6 +25,19 @@ def calculate_betti_numbers(binary_mask):
     euler_number = measure.euler_number(binary_mask, connectivity=1)
     hole_count = component_count - euler_number
     return int(component_count), int(hole_count)
+
+
+def binary_mask_to_sdf(binary_mask):
+    """将二值环形掩码转换为 signed distance field。"""
+
+    mask = binary_mask.astype(bool)
+    if not mask.any():
+        return np.ones_like(binary_mask, dtype=np.float32)
+
+    inside_distance = ndimage.distance_transform_edt(mask)
+    outside_distance = ndimage.distance_transform_edt(~mask)
+    sdf = outside_distance - inside_distance
+    return sdf.astype(np.float32)
 
 
 def resolve_acdc_root(raw_data_path):
@@ -81,15 +96,46 @@ def _normalize_image(array_2d):
     return np.zeros_like(array_2d, dtype=np.float32)
 
 
-def _make_ring_prior(shape, radius, thickness):
+def _annulus_sdf_from_geometry(shape, centre_y, centre_x, outer_radius, inner_radius):
     height, width = shape
     yy, xx = np.ogrid[:height, :width]
+    distance = np.sqrt((yy - centre_y) ** 2 + (xx - centre_x) ** 2)
+    outer_sdf = distance - float(outer_radius)
+    inner_sdf = float(inner_radius) - distance
+    annulus_sdf = np.maximum(outer_sdf, inner_sdf)
+    annulus_mask = (annulus_sdf <= 0.0).astype(np.float32)
+    return annulus_mask.astype(np.float32), annulus_sdf.astype(np.float32)
+
+
+def _make_ring_prior(shape, radius, thickness):
+    height, width = shape
     centre_y = (height - 1) / 2.0
     centre_x = (width - 1) / 2.0
-    distance = np.sqrt((yy - centre_y) ** 2 + (xx - centre_x) ** 2)
-    inner_radius = max(radius - thickness, 0)
-    prior = (distance <= radius) & (distance >= inner_radius)
-    return prior.astype(np.float32)
+    inner_radius = max(radius - thickness, 1.0)
+    return _annulus_sdf_from_geometry(shape, centre_y, centre_x, radius, inner_radius)
+
+
+def _estimate_annulus_pose(mask, base_outer_radius, base_inner_radius):
+    mask = (mask > 0).astype(np.uint8)
+    if not mask.any():
+        return np.zeros(4, dtype=np.float32)
+
+    filled_mask = ndimage.binary_fill_holes(mask).astype(np.uint8)
+    hole_mask = np.logical_and(filled_mask == 1, mask == 0)
+    coords = np.argwhere(mask > 0)
+    centre_y, centre_x = coords.mean(axis=0).astype(np.float32)
+    height, width = mask.shape
+
+    tx = (2.0 * centre_x / max(width - 1, 1)) - 1.0
+    ty = (2.0 * centre_y / max(height - 1, 1)) - 1.0
+
+    outer_radius = math.sqrt(max(float(filled_mask.sum()), 1.0) / math.pi)
+    inner_radius = math.sqrt(max(float(hole_mask.sum()), 1.0) / math.pi)
+
+    outer_scale = outer_radius / max(base_outer_radius, 1e-6)
+    inner_scale = inner_radius / max(base_inner_radius, 1e-6)
+    pose_target = np.array([tx, ty, outer_scale, inner_scale], dtype=np.float32)
+    return pose_target
 
 
 def _empty_subset_stats():
@@ -122,7 +168,8 @@ def preprocess_acdc_dataset(
         return load_manifest(processed_root)
 
     os.makedirs(processed_root, exist_ok=True)
-    prior = _make_ring_prior(target_size, prior_radius, prior_thickness)
+    prior_mask, prior_sdf = _make_ring_prior(target_size, prior_radius, prior_thickness)
+    base_inner_radius = max(float(prior_radius - prior_thickness), 1.0)
 
     records = []
     summary = {
@@ -192,6 +239,12 @@ def preprocess_acdc_dataset(
                     normalized_original_image = _normalize_image(image_slice)
                     resized_image = _resize_slice(normalized_original_image, target_size, is_label=False)
                     resized_label = _resize_slice(label_slice.astype(np.float32), target_size, is_label=True)
+                    label_sdf = binary_mask_to_sdf(resized_label)
+                    pose_target = _estimate_annulus_pose(
+                        resized_label,
+                        base_outer_radius=float(prior_radius),
+                        base_inner_radius=base_inner_radius,
+                    )
 
                     slice_name = f"{patient_id}_{frame_id}_slice{slice_index:03d}.npz"
                     relative_path = os.path.join(source_subset, slice_name)
@@ -200,7 +253,10 @@ def preprocess_acdc_dataset(
                         output_path,
                         image=resized_image.astype(np.float32),
                         label=resized_label.astype(np.float32),
-                        prior=prior.astype(np.float32),
+                        label_sdf=label_sdf.astype(np.float32),
+                        prior=prior_mask.astype(np.float32),
+                        prior_sdf=prior_sdf.astype(np.float32),
+                        pose_target=pose_target.astype(np.float32),
                         original_image=normalized_original_image.astype(np.float32),
                         original_label=label_slice.astype(np.float32),
                     )
@@ -215,18 +271,20 @@ def preprocess_acdc_dataset(
                             "original_shape": [int(image_slice.shape[0]), int(image_slice.shape[1])],
                             "spacing": spacing,
                             "betti": [int(betti[0]), int(betti[1])],
+                            "pose_target": [float(v) for v in pose_target],
                         }
                     )
                     subset_stats["kept_slices"] += 1
 
     manifest = {
-        "version": 1,
+        "version": 2,
         "raw_data_root": raw_root,
         "processed_data_root": processed_root,
         "target_size": list(target_size),
         "prior": {
             "radius": int(prior_radius),
             "thickness": int(prior_thickness),
+            "inner_radius": int(base_inner_radius),
         },
         "records": records,
         "summary": summary,
