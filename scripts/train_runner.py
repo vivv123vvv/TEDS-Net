@@ -74,6 +74,8 @@ class TrainRunner:
             params.run_name = args.run_name
         if args.evaluate_only:
             params.evaluate_only = True
+        if args.experiment_variant:
+            self.apply_experiment_variant(params, args.experiment_variant)
 
         data_path = self._resolve_path(args.data_path) if args.data_path else None
         raw_data_path = self._resolve_path(args.raw_data_path) if args.raw_data_path else None
@@ -93,6 +95,16 @@ class TrainRunner:
 
         self.force_preprocess = bool(args.force_preprocess)
         return params
+
+    def apply_experiment_variant(self, params, variant):
+        variant = variant.upper()
+        if variant not in {"D", "E"}:
+            raise ValueError(f"当前仅支持 D/E 变体，收到: {variant}")
+
+        if params.data != "ACDC":
+            raise ValueError("实验变体仅支持 ACDC 训练。")
+
+        params.dataset.topology_projection = variant == "E"
 
     def prepare_acdc_data(self):
         if self.params.data != "ACDC":
@@ -126,10 +138,18 @@ if __name__ == "__main__":
     parser.add_argument("--batch-size", type=int, dest="batch_size", help="覆盖默认 batch size。")
     parser.add_argument("--num-workers", type=int, help="覆盖 DataLoader worker 数量。")
     parser.add_argument("--seed", type=int, help="覆盖默认随机种子。")
-    parser.add_argument("--data-path", help="兼容旧接口：MNIST 的数据目录，或 ACDC 的 processed_data_path。")
+    parser.add_argument(
+        "--data-path",
+        help="兼容旧接口：MNIST 的数据目录，或 ACDC 的 processed_data_path。",
+    )
     parser.add_argument("--raw-data-path", help="ACDC 原始数据目录。")
     parser.add_argument("--processed-data-path", help="ACDC 预处理缓存目录。")
     parser.add_argument("--run-name", help="本次实验输出目录名称。")
+    parser.add_argument(
+        "--experiment-variant",
+        choices=["D", "E", "d", "e"],
+        help="ACDC 研究实验变体：D 关闭 topology projection，E 启用完整正式方案。",
+    )
     parser.add_argument("--evaluate-only", action="store_true", help="跳过训练，仅加载 best.pt 做评估。")
     parser.add_argument("--force-preprocess", action="store_true", help="强制重建 ACDC 预处理缓存。")
     parser.add_argument("--max-train-batches", type=int, help="每个 epoch 最多执行多少个训练 batch。")
