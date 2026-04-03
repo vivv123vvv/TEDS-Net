@@ -72,6 +72,8 @@ class TrainRunner:
             params.plot_predictions = False
         if args.run_name:
             params.run_name = args.run_name
+        if args.output_root:
+            params.output_root = self._resolve_path(args.output_root)
         if args.evaluate_only:
             params.evaluate_only = True
         if args.experiment_variant:
@@ -144,6 +146,7 @@ if __name__ == "__main__":
     )
     parser.add_argument("--raw-data-path", help="ACDC 原始数据目录。")
     parser.add_argument("--processed-data-path", help="ACDC 预处理缓存目录。")
+    parser.add_argument("--output-root", help="实验输出根目录。")
     parser.add_argument("--run-name", help="本次实验输出目录名称。")
     parser.add_argument(
         "--experiment-variant",
