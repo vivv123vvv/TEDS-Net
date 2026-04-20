@@ -1,57 +1,57 @@
-# ACDC Formal Benchmark Report
+# ACDC 正式 Benchmark 报告
 
-## Overview
+## 概览
 
-This report summarizes the formal ACDC benchmark run for the reproducible benchmarking workflow added in this PR.
+本报告总结了本 PR 中新增的可复现 benchmark 流程对应的 ACDC 正式训练与评估结果。
 
-- Run name: `acdc-formal-20260417`
-- Run date: `2026-04-17`
-- Device: `NVIDIA GeForce RTX 5060`
-- Dataset split manifest: `parameters/acdc_split.json`
-- Training samples: `1247`
-- Validation samples: `356`
-- Test samples: `179`
-- Epochs: `200`
-- Batch size: `5`
-- Learning rate: `0.0001`
+- Run name：`acdc-formal-20260417`
+- 运行日期：`2026-04-17`
+- 计算设备：`NVIDIA GeForce RTX 5060`
+- 数据划分文件：`parameters/acdc_split.json`
+- 训练样本数：`1247`
+- 验证样本数：`356`
+- 测试样本数：`179`
+- 训练 epoch：`200`
+- Batch size：`5`
+- Learning rate：`0.0001`
 
-The benchmark artifacts were generated locally and intentionally excluded from Git. The local output directory is:
+benchmark 产物已在本地生成，并且按约定不提交到 Git。本地输出目录为：
 
 ```text
 reports/benchmarks/acdc-formal-20260417/
 ```
 
-The best checkpoint is stored locally at:
+最佳 checkpoint 保存在：
 
 ```text
 checkpoints/acdc-formal-20260417/best_teds_net.pth
 ```
 
-## Metrics Summary
+## 指标汇总
 
-| Metric | Value |
+| 指标 | 数值 |
 | --- | ---: |
-| Best validation Dice | `0.8819` |
-| Test Dice | `0.8649` |
-| Jacobian `< 0` ratio | `0.0` |
-| Mean epoch time | `7.476 s` |
-| Mean forward time | `5.16 ms` |
-| P50 forward time | `4.68 ms` |
-| P95 forward time | `9.02 ms` |
-| Peak GPU memory during training | `222.04 MB` |
-| Peak GPU memory during evaluation | `48.72 MB` |
+| 最佳验证 Dice | `0.8819` |
+| 测试 Dice | `0.8649` |
+| Jacobian `< 0` 比例 | `0.0` |
+| 平均 epoch 时间 | `7.476 s` |
+| 平均前向时间 | `5.16 ms` |
+| P50 前向时间 | `4.68 ms` |
+| P95 前向时间 | `9.02 ms` |
+| 训练峰值 GPU 显存 | `222.04 MB` |
+| 评估峰值 GPU 显存 | `48.72 MB` |
 
-## Result Interpretation
+## 结果解读
 
-The formal run establishes a reproducible baseline for future ACDC experiments. The best validation Dice reached `0.8819`, and the held-out test Dice reached `0.8649`, which is the primary segmentation-quality metric for follow-up comparisons.
+这次正式 run 为后续 ACDC 替换实验建立了可复现 baseline。最佳验证 Dice 达到 `0.8819`，固定测试集 Dice 达到 `0.8649`，可作为后续比较分割质量的主要指标。
 
-The deformation regularity result is strong for this run: the measured Jacobian `< 0` ratio is `0.0` on the fixed test split. This means the benchmark did not detect folding on the evaluated displacement fields, so future replacement experiments should preserve this result or explicitly justify any tradeoff.
+形变正则性结果较稳定：固定测试集上的 Jacobian `< 0` 比例为 `0.0`，说明当前评估没有检测到折叠。后续如果替换积分器或形变模块，应尽量保持该指标，或者明确说明 Dice、速度、显存与折叠比例之间的取舍。
 
-The speed and memory numbers are lightweight on the current GPU. Training averaged `7.476 s` per epoch with a peak allocation of `222.04 MB`, while evaluation averaged `5.16 ms` per forward pass with `48.72 MB` peak memory. These values are now suitable as the baseline row for later integrator or architecture comparisons.
+速度与显存开销较轻：训练平均每个 epoch 为 `7.476 s`，训练峰值显存为 `222.04 MB`；评估平均前向时间为 `5.16 ms`，评估峰值显存为 `48.72 MB`。这些结果可以作为后续 integrator 或 architecture 对比实验的 baseline 行。
 
-## Generated Local Artifacts
+## 本地产物
 
-The formal run generated the following local files:
+正式 run 已生成以下本地文件：
 
 - `reports/benchmarks/acdc-formal-20260417/train_epochs.csv`
 - `reports/benchmarks/acdc-formal-20260417/train_summary.json`
@@ -61,17 +61,17 @@ The formal run generated the following local files:
 - `reports/benchmarks/comparison.csv`
 - `reports/benchmarks/comparison.md`
 
-These files are not committed because they are local experiment outputs. The PR commits only the benchmark pipeline, fixed split manifest, and report documentation.
+这些文件属于本地实验输出，不纳入提交。本 PR 只提交 benchmark pipeline、固定 split manifest 和结论文档。
 
-## Reproduction Commands
+## 复现命令
 
-Full training and automatic evaluation:
+完整训练并自动评估：
 
 ```powershell
 C:\ProgramData\Anaconda3\envs\TEDS-Net\python.exe trainACDC.py --run-name acdc-formal-20260417
 ```
 
-Standalone evaluation against the best checkpoint:
+使用最佳 checkpoint 单独评估：
 
 ```powershell
 C:\ProgramData\Anaconda3\envs\TEDS-Net\python.exe evaluate_results.py ^
@@ -79,12 +79,12 @@ C:\ProgramData\Anaconda3\envs\TEDS-Net\python.exe evaluate_results.py ^
   --run-name acdc-formal-20260417
 ```
 
-Refresh the comparison table:
+刷新对比表：
 
 ```powershell
 C:\ProgramData\Anaconda3\envs\TEDS-Net\python.exe scripts\compare_benchmarks.py
 ```
 
-## PR Conclusion
+## PR 结论
 
-This PR is ready to serve as the baseline benchmarking foundation. Future experiments can add new run directories under `reports/benchmarks/<run_name>/` locally, then compare them against `acdc-formal-20260417` using `scripts/compare_benchmarks.py`.
+本 PR 已具备作为 baseline benchmark 基础设施的条件。后续实验可以继续在本地生成 `reports/benchmarks/<run_name>/`，再通过 `scripts/compare_benchmarks.py` 与 `acdc-formal-20260417` 进行统一对比。

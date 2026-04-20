@@ -1,36 +1,38 @@
-# ACDC Benchmark Reports
+# ACDC Benchmark 报告使用说明
 
-## Default locations
+## 默认位置
 
-- Split manifest: `parameters/acdc_split.json`
-- Run reports: `reports/benchmarks/<run_name>/`
-- Best checkpoint per run: `checkpoints/<run_name>/best_teds_net.pth`
+- 固定数据划分：`parameters/acdc_split.json`
+- 训练与评估报告：`reports/benchmarks/<run_name>/`
+- 每个 run 的最佳 checkpoint：`checkpoints/<run_name>/best_teds_net.pth`
 
-## Train + auto-evaluate
+## 训练并自动评估
 
-Run from the repo root:
+在仓库根目录运行：
 
 ```powershell
 C:\ProgramData\Anaconda3\envs\TEDS-Net\python.exe trainACDC.py --run-name acdc-baseline
 ```
 
-Training writes:
+训练阶段会写出：
 
 - `train_epochs.csv`
 - `train_summary.json`
 
-After the best checkpoint is saved, the script automatically runs evaluation on the configured split and writes:
+最佳 checkpoint 保存后，训练脚本会自动在配置的 split 上运行评估，并写出：
 
 - `eval_per_sample.csv`
 - `eval_per_case.csv`
 - `eval_summary.json`
 
-It also refreshes:
+同时会刷新：
 
 - `reports/benchmarks/comparison.csv`
 - `reports/benchmarks/comparison.md`
 
-## Smoke run
+## Smoke 运行
+
+如果只想快速检查链路是否可跑，可以运行：
 
 ```powershell
 C:\ProgramData\Anaconda3\envs\TEDS-Net\python.exe trainACDC.py ^
@@ -41,7 +43,7 @@ C:\ProgramData\Anaconda3\envs\TEDS-Net\python.exe trainACDC.py ^
   --eval-max-samples 8
 ```
 
-## Standalone evaluation
+## 单独评估
 
 ```powershell
 C:\ProgramData\Anaconda3\envs\TEDS-Net\python.exe evaluate_results.py ^
@@ -49,28 +51,28 @@ C:\ProgramData\Anaconda3\envs\TEDS-Net\python.exe evaluate_results.py ^
   --run-name acdc-baseline
 ```
 
-If `--checkpoint` is omitted and `checkpoints\best_teds_net.pth` does not exist, the evaluator falls back to the most recently updated `checkpoints\<run_name>\best_teds_net.pth`.
+如果省略 `--checkpoint`，且 `checkpoints\best_teds_net.pth` 不存在，评估脚本会回退到最近更新的 `checkpoints\<run_name>\best_teds_net.pth`。
 
-## Manual comparison refresh
+## 手动刷新对比表
 
 ```powershell
 C:\ProgramData\Anaconda3\envs\TEDS-Net\python.exe scripts\compare_benchmarks.py
 ```
 
-## Formal baseline
+## 正式 baseline
 
-Formal run name: `acdc-formal-20260417`
+正式 run name：`acdc-formal-20260417`
 
-- Validation Dice: `0.8819`
-- Mean epoch time: `7.476 s`
-- Peak GPU memory during training: `222.04 MB`
-- Test Dice: `0.8649`
-- Mean forward time: `5.16 ms`
-- P50 / P95 forward time: `4.68 ms / 9.02 ms`
-- Jacobian `< 0` ratio: `0.0`
-- Peak GPU memory during evaluation: `48.72 MB`
+- 验证 Dice：`0.8819`
+- 平均 epoch 时间：`7.476 s`
+- 训练峰值 GPU 显存：`222.04 MB`
+- 测试 Dice：`0.8649`
+- 平均前向时间：`5.16 ms`
+- P50 / P95 前向时间：`4.68 ms / 9.02 ms`
+- Jacobian `< 0` 比例：`0.0`
+- 评估峰值 GPU 显存：`48.72 MB`
 
-Local artifacts for this run live under:
+该 run 的本地产物位于：
 
 - `reports/benchmarks/acdc-formal-20260417/`
 - `checkpoints/acdc-formal-20260417/best_teds_net.pth`
