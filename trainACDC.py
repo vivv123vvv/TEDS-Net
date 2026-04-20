@@ -1,159 +1,312 @@
-import os
+import argparse
+import time
+from dataclasses import asdict
+from datetime import datetime
+from pathlib import Path
+
+import numpy as np
 import torch
 import torch.optim as optim
-from torch.utils.data import DataLoader, random_split
+from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-# --- 导入自定义模块 (基于你的目录结构) ---
-from parameters.acdc_parameters import Parameters
-from network.TEDS_Net import TEDS_Net
 from dataloaders.acdc_npz import ACDCNpzDataset
+from evaluate_results import run_evaluation
+from network.TEDS_Net import TEDS_Net
+from parameters.acdc_parameters import Parameters
+from utils.acdc_benchmark import (
+    DEFAULT_BEST_CHECKPOINT_NAME,
+    DEFAULT_CHECKPOINT_ROOT,
+    DEFAULT_DATA_DIR,
+    DEFAULT_REPORTS_DIR,
+    DEFAULT_SPLIT_MANIFEST,
+    discover_run_dirs,
+    ensure_dir,
+    get_split_filenames,
+    load_split_manifest,
+    make_run_dir,
+    peak_gpu_memory_mb,
+    reset_peak_memory,
+    resolve_device,
+    sync_cuda,
+    write_comparison_artifacts,
+    write_csv,
+    write_json,
+)
 from utils.losses import dice_loss, grad_loss
 
 
-def train():
-    # ---------------------------------------------------------
-    # 1. 配置与初始化
-    # ---------------------------------------------------------
-    # 检查 GPU
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"🚀 正在使用计算设备: {device}")
+def parse_args():
+    parser = argparse.ArgumentParser(description="Train TEDS-Net on ACDC and emit local benchmark reports.")
+    parser.add_argument("--data-dir", default=str(DEFAULT_DATA_DIR))
+    parser.add_argument("--split-manifest", default=str(DEFAULT_SPLIT_MANIFEST))
+    parser.add_argument("--output-dir", default=str(DEFAULT_REPORTS_DIR))
+    parser.add_argument("--checkpoint-root", default=str(DEFAULT_CHECKPOINT_ROOT))
+    parser.add_argument("--run-name", default=None)
+    parser.add_argument("--epochs", type=int, default=None)
+    parser.add_argument("--max-train-batches", type=int, default=None)
+    parser.add_argument("--max-val-batches", type=int, default=None)
+    parser.add_argument("--eval-split", default="test")
+    parser.add_argument("--eval-warmup-batches", type=int, default=1)
+    parser.add_argument("--eval-max-samples", type=int, default=None)
+    parser.add_argument("--device", default=None)
+    parser.add_argument("--skip-final-eval", action="store_true")
+    return parser.parse_args()
 
-    # 加载参数
+
+def default_run_name():
+    return f"teds-acdc-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+
+
+def build_dataloaders(params, data_dir, split_manifest_path):
+    manifest = load_split_manifest(split_manifest_path, data_dir)
+    train_dataset = ACDCNpzDataset(data_dir, file_list=get_split_filenames(manifest, "train"))
+    val_dataset = ACDCNpzDataset(data_dir, file_list=get_split_filenames(manifest, "val"))
+
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=params.batch,
+        shuffle=True,
+        num_workers=0,
+    )
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=params.batch,
+        shuffle=False,
+        num_workers=0,
+    )
+    return manifest, train_loader, val_loader
+
+
+def checkpoint_payload(model, params, run_name, epoch, best_val_dice, data_dir, split_manifest):
+    return {
+        "state_dict": model.state_dict(),
+        "params": asdict(params),
+        "run_name": run_name,
+        "epoch": epoch,
+        "best_val_dice": float(best_val_dice),
+        "data_dir": str(data_dir),
+        "split_manifest": str(split_manifest),
+    }
+
+
+def train(args):
+    device = resolve_device(args.device)
+    print(f"Using device: {device}")
+    if device.type == "cuda":
+        print(f"GPU: {torch.cuda.get_device_name(device)}")
+    else:
+        print("CUDA not available, training on CPU.")
+
+    data_dir = Path(args.data_dir)
+    split_manifest_path = Path(args.split_manifest)
+    if not data_dir.exists():
+        raise FileNotFoundError(f"Dataset directory not found: {data_dir}")
+    if not split_manifest_path.exists():
+        raise FileNotFoundError(f"Split manifest not found: {split_manifest_path}")
+
     params = Parameters()
+    if args.epochs is not None:
+        params.epoch = args.epochs
 
-    # 强制覆盖数据路径 (确保指向你的 .npz 文件夹)
-    # 根据你的截图，路径应该是 Resources/database/processed_2d
-    # 如果你的预处理数据在别的地方，请修改这里
-    data_dir = os.path.join("Resources", "database", "processed_2d")
-
-    # 检查数据目录是否存在
-    if not os.path.exists(data_dir):
-        print(f"❌ 错误: 找不到数据目录: {data_dir}")
-        print("请检查 preprocess_acdc.py 是否运行成功，或者修改 trainACDC.py 中的 data_dir 路径。")
-        return
-
-    # ---------------------------------------------------------
-    # 2. 准备数据 (Data Pipeline)
-    # ---------------------------------------------------------
-    print(f"📂 正在加载数据从: {data_dir} ...")
-    full_dataset = ACDCNpzDataset(data_dir)
-
-    # 划分训练集和验证集 (80% 训练, 20% 验证)
-    total_size = len(full_dataset)
-    train_size = int(0.8 * total_size)
-    val_size = total_size - train_size
-
-    train_set, val_set = random_split(
-        full_dataset, [train_size, val_size],
-        generator=torch.Generator().manual_seed(42)
+    manifest, train_loader, val_loader = build_dataloaders(params, data_dir, split_manifest_path)
+    print(
+        "Loaded split manifest {manifest} | train={train_count} val={val_count} test={test_count}".format(
+            manifest=split_manifest_path,
+            train_count=manifest["counts"].get("train", 0),
+            val_count=manifest["counts"].get("val", 0),
+            test_count=manifest["counts"].get("test", 0),
+        )
     )
 
-    train_loader = DataLoader(train_set, batch_size=params.batch, shuffle=True, num_workers=0)
-    val_loader = DataLoader(val_set, batch_size=params.batch, shuffle=False, num_workers=0)
+    run_name = args.run_name or default_run_name()
+    output_dir = Path(args.output_dir)
+    run_dir = make_run_dir(output_dir, run_name)
+    checkpoint_root = ensure_dir(Path(args.checkpoint_root))
+    run_checkpoint_dir = ensure_dir(checkpoint_root / run_name)
+    best_checkpoint_path = run_checkpoint_dir / DEFAULT_BEST_CHECKPOINT_NAME
 
-    print(f"✅ 数据加载完毕: 训练集 {len(train_set)} 张, 验证集 {len(val_set)} 张")
-
-    # ---------------------------------------------------------
-    # 3. 初始化模型与优化器
-    # ---------------------------------------------------------
     model = TEDS_Net(params).to(device)
     optimizer = optim.Adam(model.parameters(), lr=params.lr)
-
-    # 初始化损失函数
     calc_dice = dice_loss()
     calc_grad = grad_loss(params)
 
-    # ---------------------------------------------------------
-    # 4. 训练循环
-    # ---------------------------------------------------------
-    print("🔥 开始训练...")
+    best_val_loss = float("inf")
+    epoch_rows = []
 
-    best_val_loss = float('inf')
-
-    for epoch in range(params.epoch):
+    print(f"Starting training run '{run_name}'...")
+    for epoch_idx in range(params.epoch):
         model.train()
-        epoch_loss = 0.0
+        reset_peak_memory(device)
+        epoch_start = time.perf_counter()
+        total_train_loss = 0.0
+        processed_train_batches = 0
 
-        # 使用 tqdm 显示进度条
-        pbar = tqdm(train_loader, desc=f"Epoch {epoch + 1}/{params.epoch}")
+        train_pbar = tqdm(train_loader, desc=f"Epoch {epoch_idx + 1}/{params.epoch}")
+        for batch_idx, (image, prior, label) in enumerate(train_pbar):
+            if args.max_train_batches is not None and batch_idx >= args.max_train_batches:
+                break
 
-        for image, prior, label in pbar:
-            # 数据移至 GPU
             image = image.to(device)
             prior = prior.to(device)
-            label = label.to(device)  # 形状通常为 [B, 1, H, W]
+            label = label.to(device)
 
-            # 清空梯度
             optimizer.zero_grad()
-
-            # 前向传播 (Forward)
-            # TEDS_Net 返回: (ft_sampled, flow_bulk_upsamp, flow_ft_upsamp)
             outputs = model(image, prior)
 
-            # 解析输出
-            # 根据 TEDS_Net.py 的逻辑 (no_branches == 2)
             if len(outputs) == 3:
                 pred_seg, flow_bulk, flow_ft = outputs
-
-                # 计算平滑度损失 (Gradient Loss)
                 loss_reg = calc_grad.loss(None, flow_bulk) + calc_grad.loss(None, flow_ft)
             else:
-                # 单分支情况 (备用)
                 pred_seg, flow = outputs
                 loss_reg = calc_grad.loss(None, flow)
 
-            # 计算分割损失 (Dice Loss)
-            # pred_seg 已经是变形后的 Prior，需要和 Ground Truth (label) 比较
             loss_dice = calc_dice.loss(label, pred_seg)
-
-            # 总损失 (加权求和)
-            # 权重参考 acdc_parameters.py: dice=1, grad=10000
-            total_loss = 1.0 * loss_dice + 10000.0 * loss_reg
-
-            # 反向传播与更新
+            total_loss = loss_dice + 10000.0 * loss_reg
             total_loss.backward()
             optimizer.step()
 
-            # 记录损失
-            epoch_loss += total_loss.item()
+            total_train_loss += total_loss.item()
+            processed_train_batches += 1
+            train_pbar.set_postfix({"loss": total_loss.item(), "dice": 1.0 - loss_dice.item()})
 
-            # 更新进度条显示
-            pbar.set_postfix({'Loss': total_loss.item(), 'Dice': (1 - loss_dice.item())})
+        if processed_train_batches == 0:
+            raise RuntimeError("No training batches were processed. Check --max-train-batches and split sizes.")
 
-        # --- 每个 Epoch 结束后进行验证 ---
-        avg_train_loss = epoch_loss / len(train_loader)
-
-        # 简单验证过程
         model.eval()
-        val_loss = 0.0
+        total_val_loss = 0.0
+        processed_val_batches = 0
         with torch.no_grad():
-            for v_img, v_prior, v_lbl in val_loader:
-                v_img, v_prior, v_lbl = v_img.to(device), v_prior.to(device), v_lbl.to(device)
+            for batch_idx, (v_img, v_prior, v_lbl) in enumerate(val_loader):
+                if args.max_val_batches is not None and batch_idx >= args.max_val_batches:
+                    break
 
+                v_img = v_img.to(device)
+                v_prior = v_prior.to(device)
+                v_lbl = v_lbl.to(device)
                 v_out = model(v_img, v_prior)
                 v_pred = v_out[0] if isinstance(v_out, tuple) else v_out
+                total_val_loss += calc_dice.loss(v_lbl, v_pred).item()
+                processed_val_batches += 1
 
-                # 只计算 Dice Loss 作为验证指标
-                val_loss += calc_dice.loss(v_lbl, v_pred).item()
+        if processed_val_batches == 0:
+            raise RuntimeError("No validation batches were processed. Check --max-val-batches and split sizes.")
 
-        avg_val_loss = val_loss / len(val_loader)
-        avg_val_dice = 1.0 - avg_val_loss  # 近似 Dice 分数
+        sync_cuda(device)
+        epoch_sec = time.perf_counter() - epoch_start
+        avg_train_loss = total_train_loss / processed_train_batches
+        avg_val_loss = total_val_loss / processed_val_batches
+        avg_val_dice = 1.0 - avg_val_loss
+        avg_batch_ms = epoch_sec * 1000.0 / processed_train_batches
+        peak_mem_mb = peak_gpu_memory_mb(device)
 
-        print(f"📊 Epoch {epoch + 1} 结束 | Train Loss: {avg_train_loss:.4f} | Val Dice: {avg_val_dice:.4f}")
+        epoch_rows.append(
+            {
+                "epoch": epoch_idx + 1,
+                "train_loss": avg_train_loss,
+                "val_dice": avg_val_dice,
+                "epoch_sec": epoch_sec,
+                "avg_batch_ms": avg_batch_ms,
+                "peak_gpu_mem_mb": peak_mem_mb,
+            }
+        )
 
-        # --- 保存模型 ---
-        # 如果是最佳模型则保存
+        memory_text = f"{peak_mem_mb:.2f} MB" if peak_mem_mb is not None else "N/A (CPU)"
+        print(
+            "Epoch {epoch} | Train Loss: {train_loss:.4f} | Val Dice: {val_dice:.4f} | "
+            "Epoch Time: {epoch_sec:.2f}s | Avg Batch Time: {avg_batch_ms:.2f} ms | Peak GPU Mem: {memory}".format(
+                epoch=epoch_idx + 1,
+                train_loss=avg_train_loss,
+                val_dice=avg_val_dice,
+                epoch_sec=epoch_sec,
+                avg_batch_ms=avg_batch_ms,
+                memory=memory_text,
+            )
+        )
+
         if avg_val_loss < best_val_loss:
             best_val_loss = avg_val_loss
-            os.makedirs("checkpoints", exist_ok=True)
-            torch.save(model.state_dict(), "checkpoints/best_teds_net.pth")
-            print("💾 最佳模型已保存!")
+            payload = checkpoint_payload(
+                model,
+                params,
+                run_name,
+                epoch_idx + 1,
+                avg_val_dice,
+                data_dir,
+                split_manifest_path,
+            )
+            torch.save(payload, best_checkpoint_path)
+            print(f"Saved best checkpoint to {best_checkpoint_path}")
 
-        # 定期保存 (例如每10轮)
-        if (epoch + 1) % 10 == 0:
-            torch.save(model.state_dict(), f"checkpoints/teds_net_epoch_{epoch + 1}.pth")
+        if (epoch_idx + 1) % params.checkpoint_freq == 0:
+            torch.save(
+                checkpoint_payload(
+                    model,
+                    params,
+                    run_name,
+                    epoch_idx + 1,
+                    avg_val_dice,
+                    data_dir,
+                    split_manifest_path,
+                ),
+                run_checkpoint_dir / f"teds_net_epoch_{epoch_idx + 1}.pth",
+            )
+
+    write_csv(
+        run_dir / "train_epochs.csv",
+        ["epoch", "train_loss", "val_dice", "epoch_sec", "avg_batch_ms", "peak_gpu_mem_mb"],
+        epoch_rows,
+    )
+
+    max_peak_mem = [row["peak_gpu_mem_mb"] for row in epoch_rows if row["peak_gpu_mem_mb"] is not None]
+    train_summary = {
+        "run_name": run_name,
+        "data_dir": str(data_dir),
+        "split_manifest": str(split_manifest_path),
+        "split_id": split_manifest_path.name,
+        "train_count": manifest["counts"].get("train", 0),
+        "val_count": manifest["counts"].get("val", 0),
+        "test_count": manifest["counts"].get("test", 0),
+        "best_val_dice": float(max(row["val_dice"] for row in epoch_rows)),
+        "mean_epoch_sec": float(np.mean([row["epoch_sec"] for row in epoch_rows])),
+        "max_peak_gpu_mem_mb": float(max(max_peak_mem)) if max_peak_mem else None,
+        "checkpoint_path": str(best_checkpoint_path),
+        "config_snapshot": asdict(params),
+        "max_train_batches": args.max_train_batches,
+        "max_val_batches": args.max_val_batches,
+    }
+    write_json(run_dir / "train_summary.json", train_summary)
+    print(f"Wrote training artifacts to {run_dir}")
+
+    if args.skip_final_eval:
+        return {
+            "run_dir": run_dir,
+            "train_summary": train_summary,
+            "best_checkpoint_path": best_checkpoint_path,
+        }
+
+    eval_result = run_evaluation(
+        checkpoint_path=best_checkpoint_path,
+        data_dir=data_dir,
+        split_manifest=split_manifest_path,
+        split=args.eval_split,
+        run_name=run_name,
+        output_dir=output_dir,
+        warmup_batches=args.eval_warmup_batches,
+        max_samples=args.eval_max_samples,
+        device=device,
+    )
+
+    comparison = write_comparison_artifacts(discover_run_dirs(output_dir), output_dir)
+    print(f"Wrote comparison artifacts to {comparison['csv_path']} and {comparison['md_path']}")
+    return {
+        "run_dir": run_dir,
+        "train_summary": train_summary,
+        "eval_result": eval_result,
+        "comparison": comparison,
+        "best_checkpoint_path": best_checkpoint_path,
+    }
 
 
 if __name__ == "__main__":
-    train()
+    train(parse_args())

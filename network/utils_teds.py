@@ -260,7 +260,7 @@ class mw_SpatialTransformer(nn.Module):
         self.mode = mode
         # create sampling grid (in Pytorch terms)
         vectors = [torch.linspace(-1, 1, s) for s in size]
-        grids = torch.meshgrid(vectors)
+        grids = torch.meshgrid(vectors, indexing='ij')
         grid = torch.stack(grids)
         grid = torch.unsqueeze(grid, 0)
         grid = grid.type(torch.FloatTensor)
@@ -317,7 +317,10 @@ class GaussianSmoothing(nn.Module):
         # The gaussian kernel is the product of the
         # gaussian function of each dimension.
         kernel = 1
-        meshgrids = torch.meshgrid([torch.arange(size, dtype=torch.float32) for size in kernel_size])
+        meshgrids = torch.meshgrid(
+            [torch.arange(size, dtype=torch.float32) for size in kernel_size],
+            indexing='ij',
+        )
 
         for size, std, mgrid in zip(kernel_size, sigma, meshgrids):
             mean = (size - 1) / 2

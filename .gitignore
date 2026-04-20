@@ -40,3 +40,11 @@ __pycache__
 
 # Git ignore:
 **/Webpage
+
+# local experiment artifacts
+.idea/
+reports/
+checkpoints/
+Resources/database/.cache/
+Resources/database/training/
+Resources/database/testing/

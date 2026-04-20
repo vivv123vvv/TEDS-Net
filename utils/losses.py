@@ -1,4 +1,3 @@
-    
 import torch
 import numpy as np
 
@@ -44,17 +43,13 @@ class grad_loss:
         Using Pytorch grid format: e.g. between -1 and 1
         '''
 
-        size =np.shape(y_pred)[2:]
-        vectors = [torch.linspace(-1, 1, s) for s in size]
-        grids = torch.meshgrid(vectors)
+        size = np.shape(y_pred)[2:]
+        device = y_pred.device
+        dtype = y_pred.dtype
+        vectors = [torch.linspace(-1, 1, s, device=device, dtype=dtype) for s in size]
+        grids = torch.meshgrid(vectors, indexing='ij')
         grid = torch.stack(grids)
-        grid = grid.to('cuda:0')
-
-        flow_feild = torch.zeros(y_pred.size(),device='cuda:0')
-        for i in range(y_pred.size()[0]):
-            flow_feild[i] = y_pred[i] +grid
-
-
+        flow_feild = y_pred + grid.unsqueeze(0)
 
         dy = torch.abs(flow_feild[:, :, 1:, : ] - flow_feild[:, :, :-1, :]) 
         dx = torch.abs(flow_feild[:, :, :, 1:] - flow_feild[:, :, :, :-1]) 
