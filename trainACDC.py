@@ -25,6 +25,8 @@ from utils.acdc_benchmark import (
     get_split_filenames,
     load_split_manifest,
     make_run_dir,
+    model_parameter_count,
+    model_parameter_count_x1e5,
     peak_gpu_memory_mb,
     reset_peak_memory,
     resolve_device,
@@ -127,6 +129,14 @@ def train(args):
     best_checkpoint_path = run_checkpoint_dir / DEFAULT_BEST_CHECKPOINT_NAME
 
     model = TEDS_Net(params).to(device)
+    parameter_count = model_parameter_count(model)
+    parameter_count_scaled = model_parameter_count_x1e5(model)
+    print(
+        "Model parameters: {count} ({scaled:.4f} x10^5)".format(
+            count=parameter_count,
+            scaled=parameter_count_scaled,
+        )
+    )
     optimizer = optim.Adam(model.parameters(), lr=params.lr)
     calc_dice = dice_loss()
     calc_grad = grad_loss(params)
@@ -206,6 +216,7 @@ def train(args):
                 "train_loss": avg_train_loss,
                 "val_dice": avg_val_dice,
                 "epoch_sec": epoch_sec,
+                "epoch_min": epoch_sec / 60.0,
                 "avg_batch_ms": avg_batch_ms,
                 "peak_gpu_mem_mb": peak_mem_mb,
             }
@@ -254,10 +265,19 @@ def train(args):
 
     write_csv(
         run_dir / "train_epochs.csv",
-        ["epoch", "train_loss", "val_dice", "epoch_sec", "avg_batch_ms", "peak_gpu_mem_mb"],
+        [
+            "epoch",
+            "train_loss",
+            "val_dice",
+            "epoch_sec",
+            "epoch_min",
+            "avg_batch_ms",
+            "peak_gpu_mem_mb",
+        ],
         epoch_rows,
     )
 
+    mean_epoch_sec = float(np.mean([row["epoch_sec"] for row in epoch_rows]))
     max_peak_mem = [row["peak_gpu_mem_mb"] for row in epoch_rows if row["peak_gpu_mem_mb"] is not None]
     train_summary = {
         "run_name": run_name,
@@ -268,8 +288,11 @@ def train(args):
         "val_count": manifest["counts"].get("val", 0),
         "test_count": manifest["counts"].get("test", 0),
         "best_val_dice": float(max(row["val_dice"] for row in epoch_rows)),
-        "mean_epoch_sec": float(np.mean([row["epoch_sec"] for row in epoch_rows])),
+        "mean_epoch_sec": mean_epoch_sec,
+        "mean_epoch_min": mean_epoch_sec / 60.0,
         "max_peak_gpu_mem_mb": float(max(max_peak_mem)) if max_peak_mem else None,
+        "parameter_count": parameter_count,
+        "parameter_count_x1e5": parameter_count_scaled,
         "checkpoint_path": str(best_checkpoint_path),
         "config_snapshot": asdict(params),
         "max_train_batches": args.max_train_batches,

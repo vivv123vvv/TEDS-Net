@@ -20,13 +20,16 @@ from utils.acdc_benchmark import (
     build_eval_summary,
     dice_score,
     get_split_filenames,
+    hausdorff_distance,
     jacobian_negative_ratio,
     load_split_manifest,
     make_run_dir,
+    model_parameter_count,
     peak_gpu_memory_mb,
     reset_peak_memory,
     resolve_device,
     sync_cuda,
+    topology_signature,
     write_csv,
     write_json,
 )
@@ -128,6 +131,7 @@ def run_evaluation(
     print(f"Evaluating checkpoint {checkpoint_path} on device {device}")
 
     model, checkpoint_payload, _ = load_model(checkpoint_path, device)
+    parameter_count = model_parameter_count(model)
     benchmark_case = infer_run_name(run_name, checkpoint_path, checkpoint_payload)
     run_dir = make_run_dir(output_dir, benchmark_case)
 
@@ -173,6 +177,11 @@ def run_evaluation(
 
             pred_mask = (pred_warped > 0.5).float()
             pred_mask, gt_masks = align_mask_tensors(pred_mask, gt_masks)
+            pred_components, pred_holes = topology_signature(pred_mask)
+            target_components, target_holes = topology_signature(gt_masks)
+            correct_topology = float(
+                (pred_components, pred_holes) == (target_components, target_holes)
+            )
 
             sample_rows.append(
                 {
@@ -181,13 +190,26 @@ def run_evaluation(
                     "case_id": case_ids[0],
                     "forward_ms": float(forward_ms),
                     "dice": dice_score(pred_mask, gt_masks),
+                    "hd": hausdorff_distance(pred_mask, gt_masks),
+                    "correct_topology": correct_topology,
+                    "pred_components": pred_components,
+                    "pred_holes": pred_holes,
+                    "target_components": target_components,
+                    "target_holes": target_holes,
                     "jacobian_neg_ratio": jacobian_negative_ratio(flow_upsamp),
                 }
             )
 
     peak_mem_mb = peak_gpu_memory_mb(device)
     per_case_rows = aggregate_metric_rows(sample_rows, "case_id")
-    summary = build_eval_summary(sample_rows, peak_mem_mb, benchmark_case, split, checkpoint_path)
+    summary = build_eval_summary(
+        sample_rows,
+        peak_mem_mb,
+        benchmark_case,
+        split,
+        checkpoint_path,
+        parameter_count=parameter_count,
+    )
     summary.update(
         {
             "run_name": benchmark_case,
@@ -198,21 +220,45 @@ def run_evaluation(
 
     write_csv(
         run_dir / "eval_per_sample.csv",
-        ["benchmark_case", "sample_id", "case_id", "forward_ms", "dice", "jacobian_neg_ratio"],
+        [
+            "benchmark_case",
+            "sample_id",
+            "case_id",
+            "forward_ms",
+            "dice",
+            "hd",
+            "correct_topology",
+            "pred_components",
+            "pred_holes",
+            "target_components",
+            "target_holes",
+            "jacobian_neg_ratio",
+        ],
         sample_rows,
     )
     write_csv(
         run_dir / "eval_per_case.csv",
-        ["case_id", "sample_count", "mean_forward_ms", "mean_dice", "mean_jacobian_neg_ratio"],
+        [
+            "case_id",
+            "sample_count",
+            "mean_forward_ms",
+            "mean_dice",
+            "mean_hd",
+            "correct_topology_rate",
+            "mean_jacobian_neg_ratio",
+        ],
         per_case_rows,
     )
     write_json(run_dir / "eval_summary.json", summary)
 
     memory_text = f"{peak_mem_mb:.2f} MB" if peak_mem_mb is not None else "N/A (CPU)"
     print(
-        "Evaluation Summary | Dice: {dice:.4f} | Jacobian < 0: {jac:.6f} | "
+        "Evaluation Summary | Dice: {dice:.4f} | HD: {hd:.4f} px | "
+        "Correct topology: {topology:.2%} | Jacobian < 0: {jac:.6f} | "
         "Mean Forward: {forward:.2f} ms | Peak GPU Mem: {memory}".format(
             dice=summary["mean_dice"] or 0.0,
+            hd=summary["mean_hd"] or 0.0,
+            topology=summary["correct_topology_rate"] or 0.0,
             jac=summary["mean_jacobian_neg_ratio"] or 0.0,
             forward=summary["mean_forward_ms"] or 0.0,
             memory=memory_text,

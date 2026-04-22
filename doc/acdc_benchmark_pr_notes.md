@@ -8,7 +8,7 @@
 
 本 PR 将 ACDC 训练和评估流程整理为一套可复现的 benchmark pipeline。它固定数据划分，记录每个 epoch 的训练速度和峰值显存，记录每个样本和每个病例的评估指标，并将本地 benchmark 报告写入 `reports/benchmarks/<run_name>/`。
 
-同时，PR 新增了自动对比脚本，后续替换积分器、网络模块或训练配置时，可以直接与同一套 baseline 字段进行对比。
+本次还补齐了论文表格中常用的 `HD`、`Correct topology`、`Time per epoch [min]` 和 `# Parameters [×10^5]` 指标。后续替换积分器、网络模块或训练配置时，可以直接与同一套 baseline 字段进行对比。
 
 ## 主要改动
 
@@ -18,15 +18,17 @@
 - 更新 `trainACDC.py`：
   - 支持 benchmark 相关 CLI 参数
   - 写出 `train_epochs.csv` 和 `train_summary.json`
+  - 记录 `epoch_min`、峰值 GPU 显存和模型参数量
   - 保存 run 专属 checkpoint
   - 训练结束后自动执行评估
   - 训练结束后自动刷新对比输出
 - 更新 `evaluate_results.py`：
   - 支持 benchmark 相关 CLI 参数
   - 写出 `eval_per_sample.csv`、`eval_per_case.csv` 和 `eval_summary.json`
+  - 记录前向时间、Dice、HD、Correct topology、Jacobian `< 0` 和评估峰值显存
   - 支持 warmup batch 和受限样本评估
 - 新增 `scripts/compare_benchmarks.py`，用于聚合多个 run 的 benchmark 结果
-- 新增 benchmark 流程文档和正式实验报告
+- 新增 benchmark 流程文档、正式实验报告和中文协作约定
 - 更新 `.gitignore`，排除本地报告、checkpoint、数据缓存和原始数据目录
 
 ## 验证结果
@@ -35,21 +37,36 @@
 - 独立评估脚本已完成验证
 - 多 run 对比聚合已完成验证
 - ACDC 正式 baseline 训练已在 `2026-04-17` 完成
+- 正式 checkpoint 已重新评估，并刷新 `HD`、`Correct topology` 和参数量指标
 
 ## 正式 baseline 结论
 
 Run name：`acdc-formal-20260417`
 
-- 最佳验证 Dice：`0.8819`
-- 测试 Dice：`0.8649`
-- 平均 epoch 时间：`7.476 s`
-- 平均前向时间：`5.16 ms`
-- P50 / P95 前向时间：`4.68 ms / 9.02 ms`
-- 训练 / 评估峰值 GPU 显存：`222.04 MB / 48.72 MB`
-- Jacobian `< 0` 比例：`0.0`
+| 指标 | 数值 |
+| --- | ---: |
+| 最佳验证 Dice | `0.8819` |
+| 测试 Dice | `0.8649` |
+| HD | `3.3776 px` |
+| Correct topology | `94.41%` |
+| 平均 epoch 时间 | `0.1246 min` / `7.476 s` |
+| 平均前向时间 | `6.04 ms` |
+| P50 / P95 前向时间 | `5.49 ms` / `9.53 ms` |
+| 训练 / 评估峰值 GPU 显存 | `222.04 MB` / `28.73 MB` |
+| 参数量 | `709,488` / `7.09488 × 10^5` |
+| Jacobian `< 0` 比例 | `0.0` |
+
+## 替换理由
+
+当前分支使用 R2Net / LC-ResNet 风格积分器替换单纯 TEDS-Net 中原有的 scaling-and-squaring 形变积分流程。这样做的理由是：积分器正是最直接影响速度、显存、形变折叠和拓扑稳定性的环节，把它单独替换可以形成更干净的控制变量实验。
+
+该替换保留了 TEDS-Net 的外部数据流和 prior warp 接口，主要改变低分辨率 velocity field 到 dense flow 的积分方式。它使用谱归一化残差块约束变换幅度，目标是在参数量仍与 TEDS-Net 同量级的情况下，减少显式形变组合开销，并维持稳定拓扑。
+
+本次正式 run 的结果显示，替换版本在固定测试集上达到 `Dice=0.8649`、`HD=3.3776 px`、`Correct topology=94.41%`、`Jacobian < 0=0.0`。这些结果支持它作为后续实验 baseline，但还不能单独证明它严格优于原版 TEDS-Net；若要形成最终结论，需要在同 split、同硬件、同训练预算下补跑原版 TEDS-Net，并用本 PR 的对比脚本生成同字段表格。
 
 ## 注意事项
 
 - 完整 benchmark 产物已在本地生成，但不会提交到 Git。
 - 正式 run 的本地产物位于 `reports/benchmarks/acdc-formal-20260417/`。
 - 最佳 checkpoint 位于 `checkpoints/acdc-formal-20260417/best_teds_net.pth`。
+- 当前 PR 提交的是可复现实验基础设施、固定 split、中文报告和对比结论，不提交训练产物。
