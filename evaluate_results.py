@@ -1,20 +1,21 @@
 import argparse
+import random
+import sys
 import time
+from datetime import datetime
 from pathlib import Path
 
+import numpy as np
 import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from dataloaders.acdc_npz import ACDCNpzDataset
 from network.TEDS_Net import TEDS_Net
-from parameters.acdc_parameters import Parameters
+from parameters.acdc_parameters import Parameters, normalize_integrator_name
 from utils.acdc_benchmark import (
     DEFAULT_BEST_CHECKPOINT_NAME,
     DEFAULT_CHECKPOINT_ROOT,
-    DEFAULT_DATA_DIR,
-    DEFAULT_REPORTS_DIR,
-    DEFAULT_SPLIT_MANIFEST,
     aggregate_metric_rows,
     align_mask_tensors,
     build_eval_summary,
@@ -33,34 +34,47 @@ from utils.acdc_benchmark import (
     write_csv,
     write_json,
 )
+from utils.dataset_registry import (
+    DEFAULT_DATASET_ID,
+    DEFAULT_DATASET_REGISTRY,
+    apply_dataset_spec_to_params,
+    resolve_dataset_spec,
+)
+from utils.experiment_logging import format_command, write_experiment_log
 
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Evaluate a TEDS-Net checkpoint and save local benchmark reports.")
-    parser.add_argument(
-        "--checkpoint",
-        default=str(DEFAULT_CHECKPOINT_ROOT / DEFAULT_BEST_CHECKPOINT_NAME),
-    )
-    parser.add_argument("--data-dir", default=str(DEFAULT_DATA_DIR))
-    parser.add_argument("--split-manifest", default=str(DEFAULT_SPLIT_MANIFEST))
+    parser.add_argument("--dataset", default=DEFAULT_DATASET_ID)
+    parser.add_argument("--dataset-registry", default=str(DEFAULT_DATASET_REGISTRY))
+    parser.add_argument("--checkpoint", default=None)
+    parser.add_argument("--checkpoint-root", default=None)
+    parser.add_argument("--data-dir", default=None)
+    parser.add_argument("--split-manifest", default=None)
     parser.add_argument("--split", default="test")
     parser.add_argument("--run-name", default=None)
-    parser.add_argument("--output-dir", default=str(DEFAULT_REPORTS_DIR))
+    parser.add_argument("--output-dir", default=None)
+    parser.add_argument("--experiment-log-dir", default=None)
+    parser.add_argument("--experiment-purpose", default=None)
+    parser.add_argument("--experiment-notes", default=None)
+    parser.add_argument("--integrator", default=None)
+    parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--warmup-batches", type=int, default=1)
     parser.add_argument("--max-samples", type=int, default=None)
     parser.add_argument("--device", default=None)
     return parser.parse_args()
 
 
-def resolve_checkpoint_path(checkpoint_path):
-    checkpoint_path = Path(checkpoint_path)
+def resolve_checkpoint_path(checkpoint_path, checkpoint_root=DEFAULT_CHECKPOINT_ROOT):
+    checkpoint_root = Path(checkpoint_root)
+    checkpoint_path = Path(checkpoint_path) if checkpoint_path else checkpoint_root / DEFAULT_BEST_CHECKPOINT_NAME
     if checkpoint_path.exists():
         return checkpoint_path
 
-    default_checkpoint = DEFAULT_CHECKPOINT_ROOT / DEFAULT_BEST_CHECKPOINT_NAME
+    default_checkpoint = checkpoint_root / DEFAULT_BEST_CHECKPOINT_NAME
     if checkpoint_path == default_checkpoint:
         candidates = sorted(
-            DEFAULT_CHECKPOINT_ROOT.glob(f"*/{DEFAULT_BEST_CHECKPOINT_NAME}"),
+            checkpoint_root.glob(f"*/{DEFAULT_BEST_CHECKPOINT_NAME}"),
             key=lambda path: path.stat().st_mtime,
             reverse=True,
         )
@@ -69,27 +83,55 @@ def resolve_checkpoint_path(checkpoint_path):
     raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
 
 
-def load_model(checkpoint_path, device):
+def set_random_seed(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+    if hasattr(torch.backends, "cudnn"):
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+
+
+def infer_integrator_from_state_dict(state_dict):
+    state_keys = state_dict.keys() if hasattr(state_dict, "keys") else []
+    if any("r2net_integrator" in key for key in state_keys):
+        return "r2net"
+    return "original_teds"
+
+
+def load_model(checkpoint_path, device, integrator=None, seed=None, dataset_spec=None):
     checkpoint = torch.load(checkpoint_path, map_location=device)
+    state_dict = checkpoint["state_dict"] if isinstance(checkpoint, dict) and "state_dict" in checkpoint else checkpoint
 
     if isinstance(checkpoint, dict) and "params" in checkpoint:
         params = Parameters.from_dict(checkpoint["params"])
+        network_payload = checkpoint["params"].get("network", {})
+        if "integrator" not in network_payload:
+            params.network.integrator = infer_integrator_from_state_dict(state_dict)
     else:
-        params = Parameters()
+        params = apply_dataset_spec_to_params(Parameters(), dataset_spec) if dataset_spec else Parameters()
+        params.network.integrator = infer_integrator_from_state_dict(state_dict)
 
-    state_dict = checkpoint["state_dict"] if isinstance(checkpoint, dict) and "state_dict" in checkpoint else checkpoint
+    if integrator is not None:
+        params.network.integrator = normalize_integrator_name(integrator)
+    if seed is not None:
+        params.seed = int(seed)
+
     model = TEDS_Net(params).to(device)
     model.load_state_dict(state_dict, strict=False)
     model.eval()
     return model, checkpoint, params
 
 
-def make_eval_loader(data_dir, split_manifest, split):
+def make_eval_loader(data_dir, split_manifest, split, dataset_spec):
     manifest = load_split_manifest(split_manifest, data_dir)
     dataset = ACDCNpzDataset(
         data_dir,
         file_list=get_split_filenames(manifest, split),
         include_metadata=True,
+        **dataset_spec.loader_kwargs(),
     )
     loader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=0)
     return manifest, loader
@@ -108,19 +150,27 @@ def infer_run_name(run_name, checkpoint_path, checkpoint_payload):
 
 def run_evaluation(
     checkpoint_path,
-    data_dir=DEFAULT_DATA_DIR,
-    split_manifest=DEFAULT_SPLIT_MANIFEST,
+    data_dir=None,
+    split_manifest=None,
     split="test",
     run_name=None,
-    output_dir=DEFAULT_REPORTS_DIR,
+    output_dir=None,
+    checkpoint_root=None,
+    integrator=None,
+    seed=None,
     warmup_batches=1,
     max_samples=None,
     device=None,
+    dataset_id=DEFAULT_DATASET_ID,
+    dataset_registry_path=DEFAULT_DATASET_REGISTRY,
+    dataset_spec=None,
 ):
-    checkpoint_path = resolve_checkpoint_path(checkpoint_path)
-    data_dir = Path(data_dir)
-    split_manifest = Path(split_manifest)
-    output_dir = Path(output_dir)
+    dataset_spec = dataset_spec or resolve_dataset_spec(dataset_id, dataset_registry_path)
+    data_dir = Path(data_dir) if data_dir else dataset_spec.data_dir
+    split_manifest = Path(split_manifest) if split_manifest else dataset_spec.split_manifest
+    output_dir = Path(output_dir) if output_dir else dataset_spec.reports_dir
+    checkpoint_root = Path(checkpoint_root) if checkpoint_root else dataset_spec.checkpoint_root
+    checkpoint_path = resolve_checkpoint_path(checkpoint_path, checkpoint_root)
 
     if not data_dir.exists():
         raise FileNotFoundError(f"Dataset directory not found: {data_dir}")
@@ -130,12 +180,21 @@ def run_evaluation(
     device = resolve_device(device)
     print(f"Evaluating checkpoint {checkpoint_path} on device {device}")
 
-    model, checkpoint_payload, _ = load_model(checkpoint_path, device)
+    model, checkpoint_payload, params = load_model(
+        checkpoint_path,
+        device,
+        integrator=integrator,
+        seed=seed,
+        dataset_spec=dataset_spec,
+    )
+    set_random_seed(params.seed)
+    print(f"Integrator: {params.network.integrator} | Seed: {params.seed}")
+
     parameter_count = model_parameter_count(model)
     benchmark_case = infer_run_name(run_name, checkpoint_path, checkpoint_payload)
     run_dir = make_run_dir(output_dir, benchmark_case)
 
-    _, warmup_loader = make_eval_loader(data_dir, split_manifest, split)
+    manifest, warmup_loader = make_eval_loader(data_dir, split_manifest, split, dataset_spec)
     if warmup_batches and warmup_batches > 0:
         print(f"Running {warmup_batches} warmup batch(es)...")
         with torch.no_grad():
@@ -149,7 +208,7 @@ def run_evaluation(
         sync_cuda(device)
 
     reset_peak_memory(device)
-    _, eval_loader = make_eval_loader(data_dir, split_manifest, split)
+    _, eval_loader = make_eval_loader(data_dir, split_manifest, split, dataset_spec)
     sample_rows = []
 
     with torch.no_grad():
@@ -213,8 +272,19 @@ def run_evaluation(
     summary.update(
         {
             "run_name": benchmark_case,
+            "dataset_id": dataset_spec.dataset_id,
+            "dataset_name": dataset_spec.display_name,
+            "dataset_registry": str(dataset_registry_path),
+            "integrator": params.network.integrator,
+            "seed": params.seed,
+            "device": str(device),
             "data_dir": str(data_dir),
             "split_manifest": str(split_manifest),
+            "split_id": split_manifest.name,
+            "train_count": manifest["counts"].get("train", 0),
+            "val_count": manifest["counts"].get("val", 0),
+            "test_count": manifest["counts"].get("test", 0),
+            "dataset_spec": dataset_spec.to_dict(),
         }
     )
 
@@ -276,14 +346,63 @@ def run_evaluation(
 
 if __name__ == "__main__":
     args = parse_args()
-    run_evaluation(
-        checkpoint_path=args.checkpoint,
-        data_dir=args.data_dir,
-        split_manifest=args.split_manifest,
-        split=args.split,
-        run_name=args.run_name,
-        output_dir=args.output_dir,
-        warmup_batches=args.warmup_batches,
-        max_samples=args.max_samples,
-        device=args.device,
+    dataset_spec = resolve_dataset_spec(args.dataset, args.dataset_registry)
+    experiment_log_dir = Path(args.experiment_log_dir) if args.experiment_log_dir else dataset_spec.experiment_log_dir
+    research_purpose = args.experiment_purpose or (
+        f"评估 TEDS-Net checkpoint 在 {dataset_spec.display_name} 数据集 {args.split} split 上的表现。"
     )
+    started_at = datetime.now().isoformat(timespec="seconds")
+    command = format_command(sys.argv)
+
+    try:
+        result = run_evaluation(
+            checkpoint_path=args.checkpoint,
+            data_dir=args.data_dir,
+            split_manifest=args.split_manifest,
+            split=args.split,
+            run_name=args.run_name,
+            output_dir=args.output_dir,
+            checkpoint_root=args.checkpoint_root,
+            integrator=args.integrator,
+            seed=args.seed,
+            warmup_batches=args.warmup_batches,
+            max_samples=args.max_samples,
+            device=args.device,
+            dataset_id=dataset_spec.dataset_id,
+            dataset_registry_path=args.dataset_registry,
+            dataset_spec=dataset_spec,
+        )
+        summary = result["summary"]
+        log_paths = write_experiment_log(
+            experiment_log_dir,
+            summary["run_name"],
+            dataset_spec,
+            research_purpose,
+            status="completed",
+            eval_summary=summary,
+            artifact_paths={
+                "run_dir": str(result["run_dir"]),
+                "eval_summary": str(result["run_dir"] / "eval_summary.json"),
+                "eval_per_sample": str(result["run_dir"] / "eval_per_sample.csv"),
+                "eval_per_case": str(result["run_dir"] / "eval_per_case.csv"),
+            },
+            command=command,
+            notes=args.experiment_notes,
+            started_at=started_at,
+        )
+        print(f"Wrote experiment log to {log_paths['md_path']}")
+    except Exception as exc:
+        fallback_run_name = args.run_name or f"eval-{dataset_spec.dataset_id}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+        log_paths = write_experiment_log(
+            experiment_log_dir,
+            fallback_run_name,
+            dataset_spec,
+            research_purpose,
+            status="failed",
+            command=command,
+            notes=args.experiment_notes,
+            error=repr(exc),
+            started_at=started_at,
+        )
+        print(f"Wrote failed experiment log to {log_paths['md_path']}")
+        raise

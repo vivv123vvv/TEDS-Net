@@ -1,0 +1,41 @@
+{
+  "defaults": {
+    "loader": "teds_npz",
+    "image_key": "image",
+    "prior_key": "prior",
+    "label_key": "label",
+    "target_rule": "label_equals_value",
+    "label_value": 1,
+    "reports_dir": "reports/benchmarks/{dataset_id}",
+    "checkpoint_root": "checkpoints/{dataset_id}",
+    "experiment_log_dir": "logs/experiments/{dataset_id}",
+    "isolation": {
+      "artifact_scope": "dataset_id",
+      "code_scope": "shared_npz_loader",
+      "model_change_scope": "parameterized_only"
+    }
+  },
+  "datasets": {
+    "acdc": {
+      "display_name": "ACDC",
+      "data_dir": "Resources/database/processed_2d",
+      "split_manifest": "parameters/acdc_split.json",
+      "label_value": 2,
+      "case_id_pattern": "^(patient\\d+_frame\\d+)",
+      "model": {
+        "dataset": {
+          "ndims": 2,
+          "inshape": [144, 208],
+          "ps_meas": [35, 7],
+          "betti": [1, 1, 0, 0]
+        }
+      },
+      "isolation": {
+        "data_layout": "legacy_acdc_processed_2d",
+        "artifact_scope": "reports, checkpoints, and experiment logs are separated by dataset_id for new runs",
+        "code_scope": "ACDC uses the shared NPZ loader with label_value=2",
+        "model_change_scope": "No ACDC-specific model file change is required; model changes should be parameterized in this registry or parameters/acdc_parameters.py."
+      }
+    }
+  }
+}
