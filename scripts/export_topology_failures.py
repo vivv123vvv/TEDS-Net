@@ -20,15 +20,64 @@ from utils.acdc_benchmark import (
     DEFAULT_DATA_DIR,
     DEFAULT_SPLIT_MANIFEST,
     align_mask_tensors,
+    assd_distance,
     dice_score,
     ensure_dir,
+    hd95_distance,
     hausdorff_distance,
+    iou_score,
     jacobian_negative_ratio,
+    precision_score,
+    recall_score,
     resolve_device,
     sync_cuda,
     topology_signature,
     write_csv,
 )
+
+TOPOLOGY_EXPORT_FIELDNAMES = [
+    "benchmark_case",
+    "sample_id",
+    "case_id",
+    "threshold",
+    "original_forward_ms",
+    "forward_ms_rerun",
+    "original_dice",
+    "dice",
+    "original_iou",
+    "iou",
+    "original_hd",
+    "hd",
+    "original_hd95",
+    "hd95",
+    "original_assd",
+    "assd",
+    "original_precision",
+    "precision",
+    "original_recall",
+    "recall",
+    "original_correct_topology",
+    "correct_topology",
+    "original_pred_components",
+    "original_pred_holes",
+    "pred_components",
+    "pred_holes",
+    "original_target_components",
+    "original_target_holes",
+    "target_components",
+    "target_holes",
+    "original_jacobian_neg_ratio",
+    "jacobian_neg_ratio",
+    "figure_path",
+    "figure_rel_path",
+]
+
+
+def optional_float(row, key):
+    value = row.get(key)
+    if value in (None, ""):
+        return None
+    return float(value)
 
 
 def parse_args():
@@ -69,7 +118,12 @@ def load_failure_rows(eval_csv_path):
                     "case_id": row["case_id"],
                     "original_forward_ms": float(row["forward_ms"]),
                     "original_dice": float(row["dice"]),
+                    "original_iou": optional_float(row, "iou"),
                     "original_hd": float(row["hd"]),
+                    "original_hd95": optional_float(row, "hd95"),
+                    "original_assd": optional_float(row, "assd"),
+                    "original_precision": optional_float(row, "precision"),
+                    "original_recall": optional_float(row, "recall"),
                     "original_correct_topology": float(row["correct_topology"]),
                     "original_pred_components": int(float(row["pred_components"])),
                     "original_pred_holes": int(float(row["pred_holes"])),
@@ -150,7 +204,8 @@ def save_sample_figure(output_path, row, image, prior, pred_prob, pred_mask, tar
     fig.suptitle(
         (
             f"{row['sample_id']} | case={row['case_id']} | "
-            f"dice={row['dice']:.4f} | hd={row['hd']:.4f} | "
+            f"dice={row['dice']:.4f} | iou={row['iou']:.4f} | "
+            f"hd={row['hd']:.4f} | hd95={row['hd95']:.4f} | "
             f"topology={row['pred_components']}/{row['pred_holes']} vs "
             f"{row['target_components']}/{row['target_holes']}"
         ),
@@ -191,26 +246,31 @@ def save_overview_figure(output_path, items):
     plt.close(fig)
 
 
-def write_markdown(output_path, rows, overview_rel_path):
+def write_markdown(output_path, rows, overview_rel_path, threshold):
     lines = [
         "# R2Net Topology Failure Samples",
         "",
         f"- Sample count: `{len(rows)}`",
-        f"- Threshold: `0.5`",
+        f"- Threshold: `{threshold:.2f}`",
         f"- Overview: `![overview]({overview_rel_path})`",
         "",
-        "| sample_id | case_id | dice | hd | pred topology | target topology | figure |",
-        "| --- | --- | --- | --- | --- | --- | --- |",
+        "| sample_id | case_id | dice | IoU | HD | HD95 | ASSD | Precision | Recall | pred topology | target topology | figure |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for row in rows:
         pred_topology = f"{row['pred_components']} comp / {row['pred_holes']} holes"
         target_topology = f"{row['target_components']} comp / {row['target_holes']} holes"
         lines.append(
-            "| {sample_id} | {case_id} | {dice:.6f} | {hd:.6f} | {pred_topology} | {target_topology} | [png]({figure_rel_path}) |".format(
+            "| {sample_id} | {case_id} | {dice:.6f} | {iou:.6f} | {hd:.6f} | {hd95:.6f} | {assd:.6f} | {precision:.6f} | {recall:.6f} | {pred_topology} | {target_topology} | [png]({figure_rel_path}) |".format(
                 sample_id=row["sample_id"],
                 case_id=row["case_id"],
                 dice=row["dice"],
+                iou=row["iou"],
                 hd=row["hd"],
+                hd95=row["hd95"],
+                assd=row["assd"],
+                precision=row["precision"],
+                recall=row["recall"],
                 pred_topology=pred_topology,
                 target_topology=target_topology,
                 figure_rel_path=row["figure_rel_path"],
@@ -232,7 +292,12 @@ def export_topology_failures(args):
 
     failure_rows = load_failure_rows(eval_csv)
     if not failure_rows:
-        raise RuntimeError(f"No topology-failure rows found in {eval_csv}")
+        write_csv(csv_path, TOPOLOGY_EXPORT_FIELDNAMES, [])
+        write_markdown(md_path, [], overview_path.name, args.threshold)
+        print(f"No topology-failure rows found in {eval_csv}")
+        print(f"Wrote empty CSV: {csv_path}")
+        print(f"Wrote Markdown: {md_path}")
+        return
 
     sample_to_path = sample_path_map(data_dir)
     missing = [row["sample_id"] for row in failure_rows if row["sample_id"] not in sample_to_path]
@@ -295,7 +360,12 @@ def export_topology_failures(args):
                 "threshold": float(args.threshold),
                 "forward_ms_rerun": forward_ms,
                 "dice": dice_score(pred_mask, target_mask),
+                "iou": iou_score(pred_mask, target_mask),
                 "hd": hausdorff_distance(pred_mask, target_mask),
+                "hd95": hd95_distance(pred_mask, target_mask),
+                "assd": assd_distance(pred_mask, target_mask),
+                "precision": precision_score(pred_mask, target_mask),
+                "recall": recall_score(pred_mask, target_mask),
                 "correct_topology": float((pred_components, pred_holes) == (target_components, target_holes)),
                 "pred_components": pred_components,
                 "pred_holes": pred_holes,
@@ -326,38 +396,9 @@ def export_topology_failures(args):
                 }
             )
 
-    write_csv(
-        csv_path,
-        [
-            "benchmark_case",
-            "sample_id",
-            "case_id",
-            "threshold",
-            "original_forward_ms",
-            "forward_ms_rerun",
-            "original_dice",
-            "dice",
-            "original_hd",
-            "hd",
-            "original_correct_topology",
-            "correct_topology",
-            "original_pred_components",
-            "original_pred_holes",
-            "pred_components",
-            "pred_holes",
-            "original_target_components",
-            "original_target_holes",
-            "target_components",
-            "target_holes",
-            "original_jacobian_neg_ratio",
-            "jacobian_neg_ratio",
-            "figure_path",
-            "figure_rel_path",
-        ],
-        exported_rows,
-    )
+    write_csv(csv_path, TOPOLOGY_EXPORT_FIELDNAMES, exported_rows)
     save_overview_figure(overview_path, overview_items)
-    write_markdown(md_path, exported_rows, overview_path.name)
+    write_markdown(md_path, exported_rows, overview_path.name, args.threshold)
 
     print(f"Wrote CSV: {csv_path}")
     print(f"Wrote Markdown: {md_path}")

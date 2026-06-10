@@ -18,15 +18,20 @@ from utils.acdc_benchmark import (
     DEFAULT_CHECKPOINT_ROOT,
     aggregate_metric_rows,
     align_mask_tensors,
+    assd_distance,
     build_eval_summary,
     dice_score,
     get_split_filenames,
+    hd95_distance,
     hausdorff_distance,
+    iou_score,
     jacobian_negative_ratio,
     load_split_manifest,
     make_run_dir,
     model_parameter_count,
     peak_gpu_memory_mb,
+    precision_score,
+    recall_score,
     reset_peak_memory,
     resolve_device,
     sync_cuda,
@@ -61,6 +66,7 @@ def parse_args():
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--warmup-batches", type=int, default=1)
     parser.add_argument("--max-samples", type=int, default=None)
+    parser.add_argument("--threshold", type=float, default=0.5)
     parser.add_argument("--device", default=None)
     return parser.parse_args()
 
@@ -160,6 +166,7 @@ def run_evaluation(
     seed=None,
     warmup_batches=1,
     max_samples=None,
+    threshold=0.5,
     device=None,
     dataset_id=DEFAULT_DATASET_ID,
     dataset_registry_path=DEFAULT_DATASET_REGISTRY,
@@ -234,7 +241,7 @@ def run_evaluation(
             else:
                 raise ValueError(f"Unexpected number of outputs from model: {len(outputs)}")
 
-            pred_mask = (pred_warped > 0.5).float()
+            pred_mask = (pred_warped > threshold).float()
             pred_mask, gt_masks = align_mask_tensors(pred_mask, gt_masks)
             pred_components, pred_holes = topology_signature(pred_mask)
             target_components, target_holes = topology_signature(gt_masks)
@@ -249,7 +256,12 @@ def run_evaluation(
                     "case_id": case_ids[0],
                     "forward_ms": float(forward_ms),
                     "dice": dice_score(pred_mask, gt_masks),
+                    "iou": iou_score(pred_mask, gt_masks),
                     "hd": hausdorff_distance(pred_mask, gt_masks),
+                    "hd95": hd95_distance(pred_mask, gt_masks),
+                    "assd": assd_distance(pred_mask, gt_masks),
+                    "precision": precision_score(pred_mask, gt_masks),
+                    "recall": recall_score(pred_mask, gt_masks),
                     "correct_topology": correct_topology,
                     "pred_components": pred_components,
                     "pred_holes": pred_holes,
@@ -277,6 +289,7 @@ def run_evaluation(
             "dataset_registry": str(dataset_registry_path),
             "integrator": params.network.integrator,
             "seed": params.seed,
+            "threshold": float(threshold),
             "device": str(device),
             "data_dir": str(data_dir),
             "split_manifest": str(split_manifest),
@@ -296,7 +309,12 @@ def run_evaluation(
             "case_id",
             "forward_ms",
             "dice",
+            "iou",
             "hd",
+            "hd95",
+            "assd",
+            "precision",
+            "recall",
             "correct_topology",
             "pred_components",
             "pred_holes",
@@ -313,7 +331,12 @@ def run_evaluation(
             "sample_count",
             "mean_forward_ms",
             "mean_dice",
+            "mean_iou",
             "mean_hd",
+            "mean_hd95",
+            "mean_assd",
+            "mean_precision",
+            "mean_recall",
             "correct_topology_rate",
             "mean_jacobian_neg_ratio",
         ],
@@ -323,11 +346,18 @@ def run_evaluation(
 
     memory_text = f"{peak_mem_mb:.2f} MB" if peak_mem_mb is not None else "N/A (CPU)"
     print(
-        "Evaluation Summary | Dice: {dice:.4f} | HD: {hd:.4f} px | "
+        "Evaluation Summary | Dice: {dice:.4f} | IoU: {iou:.4f} | "
+        "HD: {hd:.4f} px | HD95: {hd95:.4f} px | ASSD: {assd:.4f} px | "
+        "Precision: {precision:.4f} | Recall: {recall:.4f} | "
         "Correct topology: {topology:.2%} | Jacobian < 0: {jac:.6f} | "
         "Mean Forward: {forward:.2f} ms | Peak GPU Mem: {memory}".format(
             dice=summary["mean_dice"] or 0.0,
+            iou=summary["mean_iou"] or 0.0,
             hd=summary["mean_hd"] or 0.0,
+            hd95=summary["mean_hd95"] or 0.0,
+            assd=summary["mean_assd"] or 0.0,
+            precision=summary["mean_precision"] or 0.0,
+            recall=summary["mean_recall"] or 0.0,
             topology=summary["correct_topology_rate"] or 0.0,
             jac=summary["mean_jacobian_neg_ratio"] or 0.0,
             forward=summary["mean_forward_ms"] or 0.0,
@@ -367,6 +397,7 @@ if __name__ == "__main__":
             seed=args.seed,
             warmup_batches=args.warmup_batches,
             max_samples=args.max_samples,
+            threshold=args.threshold,
             device=args.device,
             dataset_id=dataset_spec.dataset_id,
             dataset_registry_path=args.dataset_registry,

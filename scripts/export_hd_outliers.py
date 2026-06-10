@@ -19,15 +19,27 @@ from evaluate_results import load_model, set_random_seed
 from utils.acdc_benchmark import (
     DEFAULT_DATA_DIR,
     align_mask_tensors,
+    assd_distance,
     dice_score,
     ensure_dir,
+    hd95_distance,
     hausdorff_distance,
+    iou_score,
     jacobian_negative_ratio,
+    precision_score,
+    recall_score,
     resolve_device,
     sync_cuda,
     topology_signature,
     write_csv,
 )
+
+
+def optional_float(row, key):
+    value = row.get(key)
+    if value in (None, ""):
+        return None
+    return float(value)
 
 
 def parse_args():
@@ -68,7 +80,12 @@ def load_eval_rows(eval_csv_path):
                     "case_id": row["case_id"],
                     "original_forward_ms": float(row["forward_ms"]),
                     "original_dice": float(row["dice"]),
+                    "original_iou": optional_float(row, "iou"),
                     "original_hd": float(row["hd"]),
+                    "original_hd95": optional_float(row, "hd95"),
+                    "original_assd": optional_float(row, "assd"),
+                    "original_precision": optional_float(row, "precision"),
+                    "original_recall": optional_float(row, "recall"),
                     "original_correct_topology": float(row["correct_topology"]),
                     "original_pred_components": int(float(row["pred_components"])),
                     "original_pred_holes": int(float(row["pred_holes"])),
@@ -170,7 +187,8 @@ def save_sample_figure(output_path, row, image, prior, pred_prob, pred_mask, tar
     fig.suptitle(
         (
             f"rank={row['hd_rank']} | {row['sample_id']} | case={row['case_id']} | "
-            f"dice={row['dice']:.4f} | hd={row['hd']:.4f} | "
+            f"dice={row['dice']:.4f} | iou={row['iou']:.4f} | "
+            f"hd={row['hd']:.4f} | hd95={row['hd95']:.4f} | "
             f"topology={row['pred_components']}/{row['pred_holes']} vs "
             f"{row['target_components']}/{row['target_holes']}"
         ),
@@ -217,28 +235,33 @@ def save_overview_figure(output_path, items, hd_threshold, hd_percentile):
     plt.close(fig)
 
 
-def write_markdown(output_path, rows, overview_rel_path, hd_percentile, hd_threshold):
+def write_markdown(output_path, rows, overview_rel_path, hd_percentile, hd_threshold, mask_threshold):
     lines = [
         "# R2Net High-HD Samples",
         "",
         f"- Selection rule: `HD >= P{hd_percentile:.1f}`",
         f"- Effective HD threshold: `{hd_threshold:.6f}`",
         f"- Sample count: `{len(rows)}`",
-        f"- Mask threshold: `0.5`",
+        f"- Mask threshold: `{mask_threshold:.2f}`",
         f"- Overview: `![overview]({overview_rel_path})`",
         "",
-        "| rank | sample_id | case_id | hd | dice | topology | figure |",
-        "| --- | --- | --- | --- | --- | --- | --- |",
+        "| rank | sample_id | case_id | HD | Dice | IoU | HD95 | ASSD | Precision | Recall | topology | figure |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for row in rows:
         topology = f"{row['pred_components']} / {row['pred_holes']} vs {row['target_components']} / {row['target_holes']}"
         lines.append(
-            "| {rank} | {sample_id} | {case_id} | {hd:.6f} | {dice:.6f} | {topology} | [png]({figure_rel_path}) |".format(
+            "| {rank} | {sample_id} | {case_id} | {hd:.6f} | {dice:.6f} | {iou:.6f} | {hd95:.6f} | {assd:.6f} | {precision:.6f} | {recall:.6f} | {topology} | [png]({figure_rel_path}) |".format(
                 rank=row["hd_rank"],
                 sample_id=row["sample_id"],
                 case_id=row["case_id"],
                 hd=row["hd"],
                 dice=row["dice"],
+                iou=row["iou"],
+                hd95=row["hd95"],
+                assd=row["assd"],
+                precision=row["precision"],
+                recall=row["recall"],
                 topology=topology,
                 figure_rel_path=row["figure_rel_path"],
             )
@@ -333,7 +356,12 @@ def export_hd_outliers(args):
                 "effective_threshold": effective_threshold,
                 "forward_ms_rerun": forward_ms,
                 "dice": dice_score(pred_mask, target_mask),
+                "iou": iou_score(pred_mask, target_mask),
                 "hd": hausdorff_distance(pred_mask, target_mask),
+                "hd95": hd95_distance(pred_mask, target_mask),
+                "assd": assd_distance(pred_mask, target_mask),
+                "precision": precision_score(pred_mask, target_mask),
+                "recall": recall_score(pred_mask, target_mask),
                 "correct_topology": float((pred_components, pred_holes) == (target_components, target_holes)),
                 "pred_components": pred_components,
                 "pred_holes": pred_holes,
@@ -379,8 +407,18 @@ def export_hd_outliers(args):
             "forward_ms_rerun",
             "original_dice",
             "dice",
+            "original_iou",
+            "iou",
             "original_hd",
             "hd",
+            "original_hd95",
+            "hd95",
+            "original_assd",
+            "assd",
+            "original_precision",
+            "precision",
+            "original_recall",
+            "recall",
             "original_correct_topology",
             "correct_topology",
             "original_pred_components",
@@ -399,7 +437,14 @@ def export_hd_outliers(args):
         exported_rows,
     )
     save_overview_figure(overview_path, overview_items, effective_threshold, args.hd_percentile)
-    write_markdown(md_path, exported_rows, overview_path.name, args.hd_percentile, effective_threshold)
+    write_markdown(
+        md_path,
+        exported_rows,
+        overview_path.name,
+        args.hd_percentile,
+        effective_threshold,
+        args.mask_threshold,
+    )
 
     print(f"Wrote CSV: {csv_path}")
     print(f"Wrote Markdown: {md_path}")

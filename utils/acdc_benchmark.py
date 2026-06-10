@@ -8,8 +8,13 @@ import numpy as np
 import torch
 
 try:
-    from scipy.ndimage import distance_transform_edt, label as connected_components
+    from scipy.ndimage import (
+        binary_erosion,
+        distance_transform_edt,
+        label as connected_components,
+    )
 except ImportError:
+    binary_erosion = None
     distance_transform_edt = None
     connected_components = None
 
@@ -163,6 +168,41 @@ def dice_score(pred, target):
     return float((2.0 * intersection + smooth) / (pred_flat.sum() + target_flat.sum() + smooth))
 
 
+def _binary_overlap_counts(pred, target):
+    pred_np = _mask_to_bool_numpy(pred)
+    target_np = _mask_to_bool_numpy(target)
+    if pred_np.shape != target_np.shape:
+        raise ValueError(f"Mask shapes do not match: {pred_np.shape} vs {target_np.shape}")
+    tp = int(np.logical_and(pred_np, target_np).sum())
+    fp = int(np.logical_and(pred_np, ~target_np).sum())
+    fn = int(np.logical_and(~pred_np, target_np).sum())
+    return tp, fp, fn
+
+
+def iou_score(pred, target):
+    tp, fp, fn = _binary_overlap_counts(pred, target)
+    union = tp + fp + fn
+    if union == 0:
+        return 1.0
+    return float(tp / union)
+
+
+def precision_score(pred, target):
+    tp, fp, fn = _binary_overlap_counts(pred, target)
+    denominator = tp + fp
+    if denominator == 0:
+        return 1.0 if fn == 0 else 0.0
+    return float(tp / denominator)
+
+
+def recall_score(pred, target):
+    tp, fp, fn = _binary_overlap_counts(pred, target)
+    denominator = tp + fn
+    if denominator == 0:
+        return 1.0 if fp == 0 else 0.0
+    return float(tp / denominator)
+
+
 def compute_jacobian_determinant_2d(flow):
     if flow.ndim != 4 or flow.shape[1] != 2:
         raise ValueError(f"Expected flow to have shape [B, 2, H, W], got {tuple(flow.shape)}")
@@ -196,8 +236,19 @@ def _mask_to_bool_numpy(mask):
 
 
 def _require_scipy_metric(metric_name):
-    if distance_transform_edt is None or connected_components is None:
+    if binary_erosion is None or distance_transform_edt is None or connected_components is None:
         raise ImportError(f"scipy is required to compute {metric_name}.")
+
+
+def _image_diagonal_length(mask_shape):
+    height, width = mask_shape
+    return float(np.hypot(height, width))
+
+
+def _surface_mask(mask_np):
+    structure = np.ones((3, 3), dtype=bool)
+    surface = mask_np & ~binary_erosion(mask_np, structure=structure, border_value=0)
+    return surface if surface.any() else mask_np
 
 
 def hausdorff_distance(pred, target):
@@ -212,14 +263,50 @@ def hausdorff_distance(pred, target):
     if not pred_has_fg and not target_has_fg:
         return 0.0
     if pred_has_fg != target_has_fg:
-        height, width = pred_np.shape
-        return float(np.hypot(height, width))
+        return _image_diagonal_length(pred_np.shape)
 
     target_distance = distance_transform_edt(~target_np)
     pred_distance = distance_transform_edt(~pred_np)
     pred_to_target = float(target_distance[pred_np].max())
     target_to_pred = float(pred_distance[target_np].max())
     return max(pred_to_target, target_to_pred)
+
+
+def symmetric_surface_distances(pred, target):
+    _require_scipy_metric("surface distances")
+    pred_np = _mask_to_bool_numpy(pred)
+    target_np = _mask_to_bool_numpy(target)
+    if pred_np.shape != target_np.shape:
+        raise ValueError(f"Mask shapes do not match: {pred_np.shape} vs {target_np.shape}")
+
+    pred_has_fg = bool(pred_np.any())
+    target_has_fg = bool(target_np.any())
+    if not pred_has_fg and not target_has_fg:
+        return np.asarray([0.0], dtype=np.float64)
+    if pred_has_fg != target_has_fg:
+        return np.asarray([_image_diagonal_length(pred_np.shape)], dtype=np.float64)
+
+    pred_surface = _surface_mask(pred_np)
+    target_surface = _surface_mask(target_np)
+    target_distance = distance_transform_edt(~target_surface)
+    pred_distance = distance_transform_edt(~pred_surface)
+    distances = np.concatenate(
+        [
+            target_distance[pred_surface],
+            pred_distance[target_surface],
+        ]
+    ).astype(np.float64, copy=False)
+    if distances.size == 0:
+        return np.asarray([0.0], dtype=np.float64)
+    return distances
+
+
+def hd95_distance(pred, target):
+    return float(np.percentile(symmetric_surface_distances(pred, target), 95))
+
+
+def assd_distance(pred, target):
+    return float(np.mean(symmetric_surface_distances(pred, target)))
 
 
 def topology_signature(mask):
@@ -272,7 +359,18 @@ def percentile(values, q):
 
 
 def aggregate_metric_rows(rows, group_key):
-    metric_keys = ["forward_ms", "dice", "hd", "correct_topology", "jacobian_neg_ratio"]
+    metric_keys = [
+        "forward_ms",
+        "dice",
+        "iou",
+        "hd",
+        "hd95",
+        "assd",
+        "precision",
+        "recall",
+        "correct_topology",
+        "jacobian_neg_ratio",
+    ]
     grouped = defaultdict(lambda: {"sample_count": 0, **{key: [] for key in metric_keys}})
     for row in rows:
         group_id = row[group_key]
@@ -307,7 +405,14 @@ def build_eval_summary(
 ):
     forward_values = [float(row["forward_ms"]) for row in sample_rows]
     dice_values = [float(row["dice"]) for row in sample_rows]
+    iou_values = [float(row["iou"]) for row in sample_rows if "iou" in row]
     hd_values = [float(row["hd"]) for row in sample_rows if "hd" in row]
+    hd95_values = [float(row["hd95"]) for row in sample_rows if "hd95" in row]
+    assd_values = [float(row["assd"]) for row in sample_rows if "assd" in row]
+    precision_values = [
+        float(row["precision"]) for row in sample_rows if "precision" in row
+    ]
+    recall_values = [float(row["recall"]) for row in sample_rows if "recall" in row]
     topology_values = [
         float(row["correct_topology"]) for row in sample_rows if "correct_topology" in row
     ]
@@ -321,8 +426,15 @@ def build_eval_summary(
         "p50_forward_ms": percentile(forward_values, 50),
         "p95_forward_ms": percentile(forward_values, 95),
         "mean_dice": float(np.mean(dice_values)) if dice_values else None,
+        "mean_iou": float(np.mean(iou_values)) if iou_values else None,
         "mean_hd": float(np.mean(hd_values)) if hd_values else None,
+        "mean_hd95": float(np.mean(hd95_values)) if hd95_values else None,
+        "mean_assd": float(np.mean(assd_values)) if assd_values else None,
+        "mean_precision": float(np.mean(precision_values)) if precision_values else None,
+        "mean_recall": float(np.mean(recall_values)) if recall_values else None,
         "hd_unit": "pixel",
+        "hd95_unit": "pixel",
+        "assd_unit": "pixel",
         "correct_topology_rate": float(np.mean(topology_values)) if topology_values else None,
         "mean_jacobian_neg_ratio": float(np.mean(jacobian_values)) if jacobian_values else None,
         "peak_gpu_mem_mb": None if peak_mem_mb is None else float(peak_mem_mb),
@@ -370,7 +482,12 @@ def comparison_rows_from_run_dirs(run_dirs):
             {
                 "case": eval_summary.get("benchmark_case", train_summary.get("run_name", run_dir.name)),
                 "dice": eval_summary.get("mean_dice"),
+                "iou": eval_summary.get("mean_iou"),
                 "hd": eval_summary.get("mean_hd"),
+                "hd95": eval_summary.get("mean_hd95"),
+                "assd": eval_summary.get("mean_assd"),
+                "precision": eval_summary.get("mean_precision"),
+                "recall": eval_summary.get("mean_recall"),
                 "correct_topology": eval_summary.get("correct_topology_rate"),
                 "time_per_epoch_min": mean_epoch_min,
                 "parameter_count_x1e5": parameter_count_scaled,
@@ -397,7 +514,12 @@ def write_comparison_artifacts(run_dirs, output_dir):
     fieldnames = [
         "case",
         "dice",
+        "iou",
         "hd",
+        "hd95",
+        "assd",
+        "precision",
+        "recall",
         "correct_topology",
         "time_per_epoch_min",
         "parameter_count_x1e5",
@@ -413,15 +535,20 @@ def write_comparison_artifacts(run_dirs, output_dir):
     write_csv(csv_path, fieldnames, rows)
 
     lines = [
-        "| case | Dice (up) | HD (down) | Correct topology (up) | Time per epoch [min] (down) | # Parameters [x10^5] | mean_forward_ms | peak_gpu_mem_mb_train | peak_gpu_mem_mb_eval | jacobian_neg_ratio |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| case | Dice (up) | IoU (up) | HD (down) | HD95 (down) | ASSD (down) | Precision (up) | Recall (up) | Correct topology (up) | Time per epoch [min] (down) | # Parameters [x10^5] | mean_forward_ms | peak_gpu_mem_mb_train | peak_gpu_mem_mb_eval | jacobian_neg_ratio |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for row in rows:
         lines.append(
-            "| {case} | {dice} | {hd} | {correct_topology} | {time_per_epoch_min} | {parameter_count_x1e5} | {mean_forward_ms} | {peak_gpu_mem_mb_train} | {peak_gpu_mem_mb_eval} | {jacobian_neg_ratio} |".format(
+            "| {case} | {dice} | {iou} | {hd} | {hd95} | {assd} | {precision} | {recall} | {correct_topology} | {time_per_epoch_min} | {parameter_count_x1e5} | {mean_forward_ms} | {peak_gpu_mem_mb_train} | {peak_gpu_mem_mb_eval} | {jacobian_neg_ratio} |".format(
                 case=_format_markdown_value(row["case"]),
                 dice=_format_markdown_value(row["dice"]),
+                iou=_format_markdown_value(row["iou"]),
                 hd=_format_markdown_value(row["hd"]),
+                hd95=_format_markdown_value(row["hd95"]),
+                assd=_format_markdown_value(row["assd"]),
+                precision=_format_markdown_value(row["precision"]),
+                recall=_format_markdown_value(row["recall"]),
                 correct_topology=_format_markdown_value(row["correct_topology"]),
                 time_per_epoch_min=_format_markdown_value(row["time_per_epoch_min"]),
                 parameter_count_x1e5=_format_markdown_value(row["parameter_count_x1e5"]),
