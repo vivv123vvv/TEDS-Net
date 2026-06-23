@@ -1,0 +1,40 @@
+split,category,value,count
+train,pathology,ARR,21
+train,pathology,CIA,21
+train,pathology,FALL,21
+train,pathology,HCM,36
+train,pathology,LV,36
+train,pathology,NOR,45
+train,pathology,RV,18
+train,pathology,TRI,18
+train,vendor,GE MEDICAL SYSTEMS,32
+train,vendor,Philips Medical Systems,53
+train,vendor,SIEMENS,131
+train,field_strength,1.5,206
+train,field_strength,3,10
+val,pathology,ARR,7
+val,pathology,CIA,7
+val,pathology,FALL,7
+val,pathology,HCM,12
+val,pathology,LV,12
+val,pathology,NOR,15
+val,pathology,RV,6
+val,pathology,TRI,6
+val,vendor,GE MEDICAL SYSTEMS,10
+val,vendor,Philips Medical Systems,18
+val,vendor,SIEMENS,44
+val,field_strength,1.5,69
+val,field_strength,3,3
+test,pathology,ARR,7
+test,pathology,CIA,7
+test,pathology,FALL,7
+test,pathology,HCM,12
+test,pathology,LV,12
+test,pathology,NOR,15
+test,pathology,RV,6
+test,pathology,TRI,6
+test,vendor,GE MEDICAL SYSTEMS,11
+test,vendor,Philips Medical Systems,17
+test,vendor,SIEMENS,44
+test,field_strength,1.5,68
+test,field_strength,3,4

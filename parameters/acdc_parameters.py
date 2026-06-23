@@ -73,6 +73,14 @@ class GeneralNet:
 class LossParams:
     loss: List = field(default_factory=lambda: ["dice", "grad", "grad"])
     weight: List = field(default_factory=lambda: [1, 10000, 10000])
+    grad_weight: float = 10000.0
+    flow_smooth_weight: float = 0.0
+    flow_smooth_penalty: str = "l2"
+    boundary_distance_weight: float = 0.0
+    boundary_distance_max: float = 20.0
+    boundary_distance_min_weight: float = 1.0
+    cldice_weight: float = 0.0
+    cldice_iterations: int = 10
 
 
 @enforce_types

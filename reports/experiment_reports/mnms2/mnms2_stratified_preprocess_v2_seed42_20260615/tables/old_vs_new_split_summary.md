@@ -1,0 +1,10 @@
+# Old vs New Split Summary
+
+| split_version | split | case_count | pathology | vendor | field_strength |
+| --- | --- | ---: | --- | --- | --- |
+| old_sequential | train | 160 | ARR:20; CIA:20; FALL:20; HCM:30; LV:30; NOR:40 | GE MEDICAL SYSTEMS:26; Philips Medical Systems:64; SIEMENS:70 | 1.5:154; 3:6 |
+| new_stratified | train | 216 | ARR:21; CIA:21; FALL:21; HCM:36; LV:36; NOR:45; RV:18; TRI:18 | GE MEDICAL SYSTEMS:32; Philips Medical Systems:53; SIEMENS:131 | 1.5:206; 3:10 |
+| old_sequential | val | 40 | ARR:5; CIA:5; FALL:5; HCM:5; LV:5; NOR:5; RV:5; TRI:5 | GE MEDICAL SYSTEMS:8; Philips Medical Systems:14; SIEMENS:18 | 1.5:34; 3:6 |
+| new_stratified | val | 72 | ARR:7; CIA:7; FALL:7; HCM:12; LV:12; NOR:15; RV:6; TRI:6 | GE MEDICAL SYSTEMS:10; Philips Medical Systems:18; SIEMENS:44 | 1.5:69; 3:3 |
+| old_sequential | test | 160 | ARR:10; CIA:10; FALL:10; HCM:25; LV:25; NOR:30; RV:25; TRI:25 | GE MEDICAL SYSTEMS:19; Philips Medical Systems:10; SIEMENS:131 | 1.5:155; 3:5 |
+| new_stratified | test | 72 | ARR:7; CIA:7; FALL:7; HCM:12; LV:12; NOR:15; RV:6; TRI:6 | GE MEDICAL SYSTEMS:11; Philips Medical Systems:17; SIEMENS:44 | 1.5:68; 3:4 |

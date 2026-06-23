@@ -36,6 +36,27 @@
         "code_scope": "ACDC uses the shared NPZ loader with label_value=2",
         "model_change_scope": "No ACDC-specific model file change is required; model changes should be parameterized in this registry or parameters/acdc_parameters.py."
       }
+    },
+    "mnms2": {
+      "display_name": "M&Ms-2",
+      "data_dir": "Resources/database/mnms2_processed_2d",
+      "split_manifest": "parameters/mnms2_split.json",
+      "label_value": 2,
+      "case_id_pattern": "^(\\d{{3}}_SA_(?:ED|ES))",
+      "model": {
+        "dataset": {
+          "ndims": 2,
+          "inshape": [144, 208],
+          "ps_meas": [35, 7],
+          "betti": [1, 1, 0, 0]
+        }
+      },
+      "isolation": {
+        "data_layout": "mnms2_short_axis_ed_es_processed_2d",
+        "artifact_scope": "reports, checkpoints, and experiment logs are separated under the mnms2 dataset_id",
+        "code_scope": "M&Ms-2 uses the shared NPZ loader with label_value=2 for MYO",
+        "model_change_scope": "No M&Ms-2-specific model file change is required; model differences are selected by --integrator."
+      }
     }
   }
 }

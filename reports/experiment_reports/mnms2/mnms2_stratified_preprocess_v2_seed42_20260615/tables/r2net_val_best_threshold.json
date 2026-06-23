@@ -1,0 +1,14 @@
+{
+  "model": "r2net",
+  "threshold": 0.78,
+  "sample_count": 1242,
+  "mean_dice": 0.8363210230597923,
+  "mean_iou": 0.7473838446850174,
+  "mean_hd": 5.470036600248063,
+  "mean_hd95": 4.086893385632918,
+  "mean_assd": 1.3797486209083774,
+  "mean_precision": 0.8515271617932386,
+  "mean_recall": 0.8332392608567227,
+  "topology_success_rate": 0.8268921095008052,
+  "topology_failure_count": 215
+}

@@ -1,0 +1,4 @@
+split,case_count,sample_count,slice_seen_count,ed_saved_slices,es_saved_slices,myo_effective_slices,empty_myo_slices_seen,topology_abnormal_slices_seen,topology_filtered_slices
+train,216,3623,4838,1935,1688,3623,1215,531,0
+val,72,1242,1678,661,581,1242,436,213,0
+test,72,1229,1612,656,573,1229,383,170,0

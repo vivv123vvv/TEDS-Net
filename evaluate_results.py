@@ -63,6 +63,7 @@ def parse_args():
     parser.add_argument("--experiment-purpose", default=None)
     parser.add_argument("--experiment-notes", default=None)
     parser.add_argument("--integrator", default=None)
+    parser.add_argument("--r2net-blocks", type=int, default=None)
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--warmup-batches", type=int, default=1)
     parser.add_argument("--max-samples", type=int, default=None)
@@ -107,7 +108,7 @@ def infer_integrator_from_state_dict(state_dict):
     return "original_teds"
 
 
-def load_model(checkpoint_path, device, integrator=None, seed=None, dataset_spec=None):
+def load_model(checkpoint_path, device, integrator=None, r2net_blocks=None, seed=None, dataset_spec=None):
     checkpoint = torch.load(checkpoint_path, map_location=device)
     state_dict = checkpoint["state_dict"] if isinstance(checkpoint, dict) and "state_dict" in checkpoint else checkpoint
 
@@ -122,6 +123,10 @@ def load_model(checkpoint_path, device, integrator=None, seed=None, dataset_spec
 
     if integrator is not None:
         params.network.integrator = normalize_integrator_name(integrator)
+    if r2net_blocks is not None:
+        if r2net_blocks <= 0:
+            raise ValueError("--r2net-blocks must be a positive integer.")
+        params.network.r2net_blocks = int(r2net_blocks)
     if seed is not None:
         params.seed = int(seed)
 
@@ -163,6 +168,7 @@ def run_evaluation(
     output_dir=None,
     checkpoint_root=None,
     integrator=None,
+    r2net_blocks=None,
     seed=None,
     warmup_batches=1,
     max_samples=None,
@@ -191,11 +197,15 @@ def run_evaluation(
         checkpoint_path,
         device,
         integrator=integrator,
+        r2net_blocks=r2net_blocks,
         seed=seed,
         dataset_spec=dataset_spec,
     )
     set_random_seed(params.seed)
-    print(f"Integrator: {params.network.integrator} | Seed: {params.seed}")
+    print(
+        f"Integrator: {params.network.integrator} | "
+        f"R2Net blocks: {params.network.r2net_blocks} | Seed: {params.seed}"
+    )
 
     parameter_count = model_parameter_count(model)
     benchmark_case = infer_run_name(run_name, checkpoint_path, checkpoint_payload)
@@ -288,6 +298,7 @@ def run_evaluation(
             "dataset_name": dataset_spec.display_name,
             "dataset_registry": str(dataset_registry_path),
             "integrator": params.network.integrator,
+            "r2net_blocks": params.network.r2net_blocks,
             "seed": params.seed,
             "threshold": float(threshold),
             "device": str(device),
@@ -394,6 +405,7 @@ if __name__ == "__main__":
             output_dir=args.output_dir,
             checkpoint_root=args.checkpoint_root,
             integrator=args.integrator,
+            r2net_blocks=args.r2net_blocks,
             seed=args.seed,
             warmup_batches=args.warmup_batches,
             max_samples=args.max_samples,

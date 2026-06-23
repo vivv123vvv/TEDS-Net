@@ -1,0 +1,204 @@
+{
+  "run_name": "mnms2-original-teds-stratified-preprocess-v2-s42-20260615-e20-warm",
+  "status": "completed",
+  "started_at": "2026-06-15T11:42:53",
+  "finished_at": "2026-06-15T11:52:42",
+  "dataset": {
+    "dataset_id": "mnms2",
+    "display_name": "M&Ms-2",
+    "data_dir": "Resources\\database\\mnms2_processed_2d",
+    "split_manifest": "parameters\\mnms2_split.json",
+    "reports_dir": "reports\\benchmarks\\mnms2",
+    "checkpoint_root": "checkpoints\\mnms2",
+    "experiment_log_dir": "logs\\experiments\\mnms2",
+    "loader": "teds_npz",
+    "image_key": "image",
+    "prior_key": "prior",
+    "label_key": "label",
+    "target_rule": "label_equals_value",
+    "label_value": 2,
+    "case_id_pattern": "^(\\d{3}_SA_(?:ED|ES))",
+    "model": {
+      "dataset": {
+        "ndims": 2,
+        "inshape": [
+          144,
+          208
+        ],
+        "ps_meas": [
+          35,
+          7
+        ],
+        "betti": [
+          1,
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    "isolation": {
+      "artifact_scope": "reports, checkpoints, and experiment logs are separated under the mnms2 dataset_id",
+      "code_scope": "M&Ms-2 uses the shared NPZ loader with label_value=2 for MYO",
+      "model_change_scope": "No M&Ms-2-specific model file change is required; model differences are selected by --integrator.",
+      "data_layout": "mnms2_short_axis_ed_es_processed_2d"
+    }
+  },
+  "research_purpose": "训练并评估 TEDS-Net 在 M&Ms-2 数据集上的分割与拓扑保持表现。",
+  "train_summary": {
+    "run_name": "mnms2-original-teds-stratified-preprocess-v2-s42-20260615-e20-warm",
+    "dataset_id": "mnms2",
+    "dataset_name": "M&Ms-2",
+    "dataset_registry": "parameters\\datasets.json",
+    "integrator": "original_teds",
+    "r2net_blocks": 7,
+    "seed": 42,
+    "device": "cuda",
+    "data_dir": "Resources\\database\\mnms2_stratified_seed42_20260615_preprocess_v2_2d",
+    "split_manifest": "parameters\\mnms2_stratified_seed42_20260615_preprocess_v2_split.json",
+    "split_id": "mnms2_stratified_seed42_20260615_preprocess_v2_split.json",
+    "train_count": 3623,
+    "val_count": 1242,
+    "test_count": 1229,
+    "best_val_dice": 0.8466777073810379,
+    "mean_epoch_sec": 29.403469314798713,
+    "mean_epoch_min": 0.4900578219133119,
+    "max_peak_gpu_mem_mb": 216.26611328125,
+    "parameter_count": 708928,
+    "parameter_count_x1e5": 7.08928,
+    "checkpoint_path": "checkpoints\\mnms2\\mnms2-original-teds-stratified-preprocess-v2-s42-20260615-e20-warm\\best_teds_net.pth",
+    "config_snapshot": {
+      "epoch": 20,
+      "lr": 2e-05,
+      "lr_sch": false,
+      "batch": 5,
+      "checkpoint_freq": 50,
+      "threshold": 0.3,
+      "seed": 42,
+      "loss_params": {
+        "loss": [
+          "dice",
+          "grad",
+          "grad"
+        ],
+        "weight": [
+          1,
+          10000,
+          10000
+        ],
+        "grad_weight": 10000.0,
+        "flow_smooth_weight": 0.0,
+        "flow_smooth_penalty": "l2",
+        "boundary_distance_weight": 0.0,
+        "boundary_distance_max": 20.0,
+        "boundary_distance_min_weight": 1.0,
+        "cldice_weight": 0.0,
+        "cldice_iterations": 10
+      },
+      "network_params": {
+        "dropout": 1,
+        "fi": 12,
+        "net_depth": 4,
+        "in_chan": 1,
+        "out_chan": 1
+      },
+      "data": "mnms2",
+      "dataset": {
+        "ndims": 2,
+        "inshape": [
+          144,
+          208
+        ],
+        "ps_meas": [
+          35,
+          7
+        ],
+        "datapath": "Resources\\database\\mnms2_processed_2d",
+        "betti": [
+          1,
+          1,
+          0,
+          0
+        ]
+      },
+      "net": "teds",
+      "network": {
+        "act": 1,
+        "diffeo_int": 8,
+        "guas_smooth": 1,
+        "Guas_kernel": 5,
+        "sigma": 2.0,
+        "mega_P": 2,
+        "integrator": "original_teds",
+        "r2net_blocks": 7,
+        "dec_depth": [
+          4,
+          2
+        ]
+      }
+    },
+    "init_checkpoint": {
+      "path": "checkpoints\\mnms2\\mnms2-original-teds-s42-e200\\best_teds_net.pth",
+      "missing_keys": [],
+      "unexpected_keys": []
+    },
+    "best_checkpoint_metric": "dice",
+    "best_val_score": 0.15332229261896219,
+    "best_val_dice_loss": 0.15332229261896219,
+    "dataset_spec": {
+      "dataset_id": "mnms2",
+      "display_name": "M&Ms-2",
+      "data_dir": "Resources\\database\\mnms2_processed_2d",
+      "split_manifest": "parameters\\mnms2_split.json",
+      "reports_dir": "reports\\benchmarks\\mnms2",
+      "checkpoint_root": "checkpoints\\mnms2",
+      "experiment_log_dir": "logs\\experiments\\mnms2",
+      "loader": "teds_npz",
+      "image_key": "image",
+      "prior_key": "prior",
+      "label_key": "label",
+      "target_rule": "label_equals_value",
+      "label_value": 2,
+      "case_id_pattern": "^(\\d{3}_SA_(?:ED|ES))",
+      "model": {
+        "dataset": {
+          "ndims": 2,
+          "inshape": [
+            144,
+            208
+          ],
+          "ps_meas": [
+            35,
+            7
+          ],
+          "betti": [
+            1,
+            1,
+            0,
+            0
+          ]
+        }
+      },
+      "isolation": {
+        "artifact_scope": "reports, checkpoints, and experiment logs are separated under the mnms2 dataset_id",
+        "code_scope": "M&Ms-2 uses the shared NPZ loader with label_value=2 for MYO",
+        "model_change_scope": "No M&Ms-2-specific model file change is required; model differences are selected by --integrator.",
+        "data_layout": "mnms2_short_axis_ed_es_processed_2d"
+      }
+    },
+    "max_train_batches": null,
+    "max_val_batches": null,
+    "hard_sample_training": null
+  },
+  "eval_summary": null,
+  "comparison": null,
+  "artifact_paths": {
+    "run_dir": "reports\\benchmarks\\mnms2\\mnms2-original-teds-stratified-preprocess-v2-s42-20260615-e20-warm",
+    "train_summary": "reports\\benchmarks\\mnms2\\mnms2-original-teds-stratified-preprocess-v2-s42-20260615-e20-warm\\train_summary.json",
+    "train_epochs": "reports\\benchmarks\\mnms2\\mnms2-original-teds-stratified-preprocess-v2-s42-20260615-e20-warm\\train_epochs.csv",
+    "eval_summary": null
+  },
+  "command": "trainACDC.py --dataset mnms2 --data-dir 'Resources\\database\\mnms2_stratified_seed42_20260615_preprocess_v2_2d' --split-manifest 'parameters\\mnms2_stratified_seed42_20260615_preprocess_v2_split.json' --run-name mnms2-original-teds-stratified-preprocess-v2-s42-20260615-e20-warm --epochs 20 --lr 0.00002 --integrator original_teds --init-checkpoint 'checkpoints\\mnms2\\mnms2-original-teds-s42-e200\\best_teds_net.pth' --best-checkpoint-metric dice --device cuda --skip-final-eval --experiment-notes 'Warm-start original TEDS baseline on stratified seed42 preprocess-v2 split.'",
+  "notes": "Warm-start original TEDS baseline on stratified seed42 preprocess-v2 split.",
+  "error": null
+}

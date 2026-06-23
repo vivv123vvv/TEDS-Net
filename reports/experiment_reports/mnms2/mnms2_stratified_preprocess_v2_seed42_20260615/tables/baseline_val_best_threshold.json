@@ -1,0 +1,14 @@
+{
+  "model": "baseline",
+  "threshold": 0.58,
+  "sample_count": 1242,
+  "mean_dice": 0.8373143543773628,
+  "mean_iou": 0.7445680448320909,
+  "mean_hd": 5.10180746944801,
+  "mean_hd95": 3.7295760122178834,
+  "mean_assd": 1.2583951553936419,
+  "mean_precision": 0.838417638058874,
+  "mean_recall": 0.8458984107578242,
+  "topology_success_rate": 0.8285024154589372,
+  "topology_failure_count": 213
+}
