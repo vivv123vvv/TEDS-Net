@@ -1,0 +1,342 @@
+{
+  "run_name": "mnms2-3d-baseline-original-teds-s42-e200-b1",
+  "status": "completed",
+  "started_at": "2026-06-30T16:56:26",
+  "finished_at": "2026-06-30T19:26:22",
+  "dataset": {
+    "dataset_id": "mnms2_3d",
+    "display_name": "M&Ms-2 3D",
+    "data_dir": "Resources\\database\\mnms2_stratified_seed42_20260615_preprocess_v2_3d",
+    "split_manifest": "parameters\\mnms2_stratified_seed42_20260615_preprocess_v2_3d_split.json",
+    "reports_dir": "reports\\benchmarks\\mnms2_3d",
+    "checkpoint_root": "checkpoints\\mnms2_3d",
+    "experiment_log_dir": "logs\\experiments\\mnms2_3d",
+    "loader": "teds_npz",
+    "image_key": "image",
+    "prior_key": "prior",
+    "label_key": "label",
+    "target_rule": "label_equals_value",
+    "label_value": 2,
+    "case_id_pattern": "^(\\d{3}_SA_(?:ED|ES))",
+    "model": {
+      "dataset": {
+        "ndims": 3,
+        "inshape": [
+          16,
+          144,
+          208
+        ],
+        "ps_meas": [
+          35,
+          7
+        ],
+        "betti": [
+          1,
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    "isolation": {
+      "artifact_scope": "reports, checkpoints, and experiment logs are separated under the mnms2_3d dataset_id",
+      "code_scope": "M&Ms-2 3D uses the shared NPZ loader with label_value=2 for MYO and D,H,W tensors",
+      "model_change_scope": "3D behavior is selected through the dataset registry ndims/inshape fields.",
+      "data_layout": "mnms2_short_axis_ed_es_processed_3d_volume"
+    }
+  },
+  "research_purpose": "训练并评估 TEDS-Net 在 M&Ms-2 3D 数据集上的分割与拓扑保持表现。",
+  "train_summary": {
+    "run_name": "mnms2-3d-baseline-original-teds-s42-e200-b1",
+    "dataset_id": "mnms2_3d",
+    "dataset_name": "M&Ms-2 3D",
+    "dataset_registry": "parameters\\datasets.json",
+    "integrator": "original_teds",
+    "r2net_blocks": 7,
+    "seed": 42,
+    "device": "cuda",
+    "data_dir": "Resources\\database\\mnms2_stratified_seed42_20260615_preprocess_v2_3d",
+    "split_manifest": "parameters\\mnms2_stratified_seed42_20260615_preprocess_v2_3d_split.json",
+    "split_id": "mnms2_stratified_seed42_20260615_preprocess_v2_3d_split.json",
+    "train_count": 432,
+    "val_count": 144,
+    "test_count": 144,
+    "best_val_dice": 0.3459406341943476,
+    "mean_epoch_sec": 44.41101288846694,
+    "mean_epoch_min": 0.7401835481411158,
+    "max_peak_gpu_mem_mb": 1297.6884765625,
+    "parameter_count": 2027958,
+    "parameter_count_x1e5": 20.27958,
+    "checkpoint_path": "checkpoints\\mnms2_3d\\mnms2-3d-baseline-original-teds-s42-e200-b1\\best_teds_net.pth",
+    "config_snapshot": {
+      "epoch": 200,
+      "lr": 0.0001,
+      "lr_sch": false,
+      "batch": 1,
+      "checkpoint_freq": 50,
+      "threshold": 0.3,
+      "seed": 42,
+      "loss_params": {
+        "loss": [
+          "dice",
+          "grad",
+          "grad"
+        ],
+        "weight": [
+          1,
+          10000,
+          10000
+        ],
+        "grad_weight": 10000.0,
+        "flow_smooth_weight": 0.0,
+        "flow_smooth_penalty": "l2",
+        "boundary_distance_weight": 0.0,
+        "boundary_distance_max": 20.0,
+        "boundary_distance_min_weight": 1.0,
+        "cldice_weight": 0.0,
+        "cldice_iterations": 10
+      },
+      "network_params": {
+        "dropout": 1,
+        "fi": 12,
+        "net_depth": 4,
+        "in_chan": 1,
+        "out_chan": 1
+      },
+      "data": "mnms2_3d",
+      "dataset": {
+        "ndims": 3,
+        "inshape": [
+          16,
+          144,
+          208
+        ],
+        "ps_meas": [
+          35,
+          7
+        ],
+        "datapath": "Resources\\database\\mnms2_stratified_seed42_20260615_preprocess_v2_3d",
+        "betti": [
+          1,
+          1,
+          0,
+          0
+        ]
+      },
+      "net": "teds",
+      "network": {
+        "act": 1,
+        "diffeo_int": 8,
+        "guas_smooth": 1,
+        "Guas_kernel": 5,
+        "sigma": 2.0,
+        "mega_P": 2,
+        "integrator": "original_teds",
+        "r2net_blocks": 7,
+        "dec_depth": [
+          4,
+          2
+        ]
+      }
+    },
+    "init_checkpoint": null,
+    "best_checkpoint_metric": "dice",
+    "best_val_score": 0.6540593658056524,
+    "best_val_dice_loss": 0.6540593658056524,
+    "dataset_spec": {
+      "dataset_id": "mnms2_3d",
+      "display_name": "M&Ms-2 3D",
+      "data_dir": "Resources\\database\\mnms2_stratified_seed42_20260615_preprocess_v2_3d",
+      "split_manifest": "parameters\\mnms2_stratified_seed42_20260615_preprocess_v2_3d_split.json",
+      "reports_dir": "reports\\benchmarks\\mnms2_3d",
+      "checkpoint_root": "checkpoints\\mnms2_3d",
+      "experiment_log_dir": "logs\\experiments\\mnms2_3d",
+      "loader": "teds_npz",
+      "image_key": "image",
+      "prior_key": "prior",
+      "label_key": "label",
+      "target_rule": "label_equals_value",
+      "label_value": 2,
+      "case_id_pattern": "^(\\d{3}_SA_(?:ED|ES))",
+      "model": {
+        "dataset": {
+          "ndims": 3,
+          "inshape": [
+            16,
+            144,
+            208
+          ],
+          "ps_meas": [
+            35,
+            7
+          ],
+          "betti": [
+            1,
+            1,
+            0,
+            0
+          ]
+        }
+      },
+      "isolation": {
+        "artifact_scope": "reports, checkpoints, and experiment logs are separated under the mnms2_3d dataset_id",
+        "code_scope": "M&Ms-2 3D uses the shared NPZ loader with label_value=2 for MYO and D,H,W tensors",
+        "model_change_scope": "3D behavior is selected through the dataset registry ndims/inshape fields.",
+        "data_layout": "mnms2_short_axis_ed_es_processed_3d_volume"
+      }
+    },
+    "max_train_batches": null,
+    "max_val_batches": null,
+    "hard_sample_training": null
+  },
+  "eval_summary": {
+    "benchmark_case": "mnms2-3d-baseline-original-teds-s42-e200-b1",
+    "split": "test",
+    "checkpoint_path": "checkpoints\\mnms2_3d\\mnms2-3d-baseline-original-teds-s42-e200-b1\\best_teds_net.pth",
+    "sample_count": 144,
+    "mean_forward_ms": 21.36773407174688,
+    "p50_forward_ms": 14.61275015026331,
+    "p95_forward_ms": 68.60991013236344,
+    "mean_dice": 0.34555522528373533,
+    "mean_iou": 0.2105898793398095,
+    "mean_hd": 14.706829091611597,
+    "mean_hd95": 7.490716294735735,
+    "mean_assd": 2.8918189176832594,
+    "mean_precision": 0.23327599205705152,
+    "mean_recall": 0.6854624328319354,
+    "hd_unit": "pixel",
+    "hd95_unit": "pixel",
+    "assd_unit": "pixel",
+    "correct_topology_rate": 0.6875,
+    "mean_jacobian_neg_ratio": 0.0,
+    "peak_gpu_mem_mb": 824.0849609375,
+    "parameter_count": 2027958,
+    "parameter_count_x1e5": 20.27958,
+    "run_name": "mnms2-3d-baseline-original-teds-s42-e200-b1",
+    "dataset_id": "mnms2_3d",
+    "dataset_name": "M&Ms-2 3D",
+    "dataset_registry": "parameters\\datasets.json",
+    "integrator": "original_teds",
+    "r2net_blocks": 7,
+    "seed": 42,
+    "threshold": 0.5,
+    "device": "cuda",
+    "data_dir": "Resources\\database\\mnms2_stratified_seed42_20260615_preprocess_v2_3d",
+    "split_manifest": "parameters\\mnms2_stratified_seed42_20260615_preprocess_v2_3d_split.json",
+    "split_id": "mnms2_stratified_seed42_20260615_preprocess_v2_3d_split.json",
+    "train_count": 432,
+    "val_count": 144,
+    "test_count": 144,
+    "dataset_spec": {
+      "dataset_id": "mnms2_3d",
+      "display_name": "M&Ms-2 3D",
+      "data_dir": "Resources\\database\\mnms2_stratified_seed42_20260615_preprocess_v2_3d",
+      "split_manifest": "parameters\\mnms2_stratified_seed42_20260615_preprocess_v2_3d_split.json",
+      "reports_dir": "reports\\benchmarks\\mnms2_3d",
+      "checkpoint_root": "checkpoints\\mnms2_3d",
+      "experiment_log_dir": "logs\\experiments\\mnms2_3d",
+      "loader": "teds_npz",
+      "image_key": "image",
+      "prior_key": "prior",
+      "label_key": "label",
+      "target_rule": "label_equals_value",
+      "label_value": 2,
+      "case_id_pattern": "^(\\d{3}_SA_(?:ED|ES))",
+      "model": {
+        "dataset": {
+          "ndims": 3,
+          "inshape": [
+            16,
+            144,
+            208
+          ],
+          "ps_meas": [
+            35,
+            7
+          ],
+          "betti": [
+            1,
+            1,
+            0,
+            0
+          ]
+        }
+      },
+      "isolation": {
+        "artifact_scope": "reports, checkpoints, and experiment logs are separated under the mnms2_3d dataset_id",
+        "code_scope": "M&Ms-2 3D uses the shared NPZ loader with label_value=2 for MYO and D,H,W tensors",
+        "model_change_scope": "3D behavior is selected through the dataset registry ndims/inshape fields.",
+        "data_layout": "mnms2_short_axis_ed_es_processed_3d_volume"
+      }
+    }
+  },
+  "comparison": {
+    "rows": [
+      {
+        "case": "mnms2-3d-baseline-original-teds-s42-e200-b1",
+        "dice": 0.34555522528373533,
+        "iou": 0.2105898793398095,
+        "hd": 14.706829091611597,
+        "hd95": 7.490716294735735,
+        "assd": 2.8918189176832594,
+        "precision": 0.23327599205705152,
+        "recall": 0.6854624328319354,
+        "correct_topology": 0.6875,
+        "time_per_epoch_min": 0.7401835481411158,
+        "parameter_count_x1e5": 20.27958,
+        "mean_forward_ms": 21.36773407174688,
+        "mean_epoch_sec": 44.41101288846694,
+        "peak_gpu_mem_mb_train": 1297.6884765625,
+        "peak_gpu_mem_mb_eval": 824.0849609375,
+        "jacobian_neg_ratio": 0.0
+      },
+      {
+        "case": "mnms2-3d-r2net-s42-e200-b1",
+        "dice": 0.7094869330111477,
+        "iou": 0.556078792195297,
+        "hd": 13.734023353688919,
+        "hd95": 3.5132131289160133,
+        "assd": 0.8675683540728341,
+        "precision": 0.6789209704400008,
+        "recall": 0.7514256295915581,
+        "correct_topology": 0.5694444444444444,
+        "time_per_epoch_min": 0.7990853964830749,
+        "parameter_count_x1e5": 20.31486,
+        "mean_forward_ms": 23.612128434857976,
+        "mean_epoch_sec": 47.94512378898449,
+        "peak_gpu_mem_mb_train": 1306.7705078125,
+        "peak_gpu_mem_mb_eval": 830.1689453125,
+        "jacobian_neg_ratio": 0.0
+      },
+      {
+        "case": "mnms2-3d-smoke-e1-b1",
+        "dice": 0.0006657451278856696,
+        "iou": 0.0003330941887875372,
+        "hd": 32.87371311720032,
+        "hd95": 30.12527191079336,
+        "assd": 17.554467278481003,
+        "precision": 0.00035910610204138005,
+        "recall": 0.004556607080266386,
+        "correct_topology": 1.0,
+        "time_per_epoch_min": 0.07176357166220744,
+        "parameter_count_x1e5": 20.28462,
+        "mean_forward_ms": 10.883749928325415,
+        "mean_epoch_sec": 4.305814299732447,
+        "peak_gpu_mem_mb_train": 1178.7509765625,
+        "peak_gpu_mem_mb_eval": 824.4736328125,
+        "jacobian_neg_ratio": 0.0
+      }
+    ],
+    "csv_path": "reports\\benchmarks\\mnms2_3d\\comparison.csv",
+    "md_path": "reports\\benchmarks\\mnms2_3d\\comparison.md"
+  },
+  "artifact_paths": {
+    "run_dir": "reports\\benchmarks\\mnms2_3d\\mnms2-3d-baseline-original-teds-s42-e200-b1",
+    "train_summary": "reports\\benchmarks\\mnms2_3d\\mnms2-3d-baseline-original-teds-s42-e200-b1\\train_summary.json",
+    "train_epochs": "reports\\benchmarks\\mnms2_3d\\mnms2-3d-baseline-original-teds-s42-e200-b1\\train_epochs.csv",
+    "eval_summary": "reports\\benchmarks\\mnms2_3d\\mnms2-3d-baseline-original-teds-s42-e200-b1\\eval_summary.json"
+  },
+  "command": "trainACDC.py --dataset mnms2_3d --run-name mnms2-3d-baseline-original-teds-s42-e200-b1 --integrator original_teds --epochs 200 --batch-size 1 --device cuda",
+  "notes": null,
+  "error": null
+}
